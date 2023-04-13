@@ -6,8 +6,10 @@ import java.net.UnknownHostException;
 import java.security.InvalidKeyException;
 import java.security.KeyStore;
 import java.security.KeyStoreException;
+import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.PrivateKey;
+import java.security.PublicKey;
 import java.security.SignatureException;
 import java.security.UnrecoverableKeyException;
 import java.security.cert.CertificateException;
@@ -21,6 +23,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import consensus.messages.PrePrepareMessage;
+import consensus.messages.PrepareMessage;
 import consensus.notifications.CommittedNotification;
 import consensus.notifications.ViewChange;
 import consensus.requests.ProposeRequest;
@@ -97,10 +100,12 @@ public class PBFTProtocol extends GenericProtocol {
 		
 		// TODO: Must add handlers for requests and messages and register message serializers
 
+
 		
         //registerMessageHandler(peerChannel, ProposeRequest.REQUEST_ID, null);
 
 		registerRequestHandler(ProposeRequest.REQUEST_ID, this::handleProposeRequest);
+		registerMessageHandler(peerChannel, PrePrepareMessage.MESSAGE_ID, this::handlePrePrepareMessage);
 		
 		registerChannelEventHandler(peerChannel, InConnectionDown.EVENT_ID, this::uponInConnectionDown);
         registerChannelEventHandler(peerChannel, InConnectionUp.EVENT_ID, this::uponInConnectionUp);
@@ -114,10 +119,16 @@ public class PBFTProtocol extends GenericProtocol {
 		try { Thread.sleep(10 * 1000); } catch (InterruptedException e) { }
 		
 		// TODO: Open connections to all nodes in the (initial) view 
-	/* 	for (Host host : view) {
-			openConnection(host);
-		}
-		*/
+
+
+
+	 	//for (Host host : view) {
+		//	openConnection(host);
+
+		
+		
+		//}
+		
 		
 		//Installing first view
 		triggerNotification(new ViewChange(view, viewNumber));
@@ -131,32 +142,29 @@ public class PBFTProtocol extends GenericProtocol {
 	}
 
 	private void handleProposeRequest(ProposeRequest request, short from) {
-         //teste
-		logger.info("Teste: " + from);
-		
-		String identifier = String.valueOf(from);
-		
-		Enumeration<String> teste;
-		try {
-			teste = truststore.aliases();
-			while(teste.hasMoreElements()){
-				String element = teste.nextElement();
-				logger.info(element);
+
+		//Verify if the signature of the block is valid
+	 	try {
+
+			
+
+			
+		    if(SignaturesHelper.checkSignature(request.getBlock(), request.getSignature(), truststore.getCertificate(cryptoName).getPublicKey())){
+
+
+				//Hashing the block
+				MessageDigest digest = MessageDigest.getInstance("SHA-256");
+				byte[] blockHash = digest.digest(request.getBlock());
+                byte[] signature = SignaturesHelper.generateSignature(blockHash, this.key);
+				
+
+				sendMessage(new PrePrepareMessage(blockHash, signature, seq, viewNumber), self);
+			}else{
+				//signature is invalid
+				logger.info("Signature invalid");
 			}
-	
-		} catch (KeyStoreException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		}
-
-		
-
-
-		
-
-		//Verify if the signature is 
-	/* 	try {
-			SignaturesHelper.checkSignature(request.getBlock(), request.getSignature(), truststore.getCertificate(identifier).getPublicKey());
+        
+			  
 		} catch (InvalidKeyException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
@@ -171,21 +179,26 @@ public class PBFTProtocol extends GenericProtocol {
 			e.printStackTrace();
 		}
 
-		*/
+		
+		
+		
 
-
-
+        
 		sendMessage(new PrePrepareMessage(request.getBlock(), request.getSignature()), self);
         
-		//triggerNotification(new CommittedNotification(request.getBlock(),request.getSignature()));
+	
 		
     }
+
+	private void handlePrePrepareMessage(PrePrepareMessage msg, Host from, short sourceProto, int channel){
+
+	}
 	
 	/* --------------------------------------- Connection Manager Functions ----------------------------------- */
 	
     private void uponOutConnectionUp(OutConnectionUp event, int channel) {
         logger.info(event);
-		//sendMessage(new ProposeRequest(null, null), event.getNode());
+		
     }
 
     private void uponOutConnectionDown(OutConnectionDown event, int channel) {

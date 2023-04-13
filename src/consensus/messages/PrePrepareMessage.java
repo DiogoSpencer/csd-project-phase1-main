@@ -8,16 +8,20 @@ import pt.unl.fct.di.novasys.babel.generic.signed.SignedProtoMessage;
 
 public class PrePrepareMessage extends SignedProtoMessage {
 
-	private final static short MESSAGE_ID = 101;
+	public final static short MESSAGE_ID = 101;
 	
 	//TODO: Define here the elements of the message
 	private final byte[] block;
 	private final byte[] signature;
+	private final int seqN;
+	private final int viewN;
 	
-	public PrePrepareMessage(byte[] block, byte[] signature) {
+	public PrePrepareMessage(byte[] block, byte[] signature, int seqN, int viewN) {
 		super(PrePrepareMessage.MESSAGE_ID);
 		this.block = block;
 		this.signature = signature;
+		this.seqN = seqN;
+		this.viewN = viewN;
 	}
 
 	public static SignedMessageSerializer<PrePrepareMessage> serializer = new SignedMessageSerializer<PrePrepareMessage>() {
@@ -36,6 +40,12 @@ public class PrePrepareMessage extends SignedProtoMessage {
 	
 			// Write the signature array
 			out.writeBytes(signedProtoMessage.signature);
+
+			out.writeInt(signedProtoMessage.seqN);
+
+			out.writeInt(signedProtoMessage.viewN);
+
+		   
 			
 		}
 
@@ -56,9 +66,12 @@ public class PrePrepareMessage extends SignedProtoMessage {
 			// Read the signature array
 			byte[] signature = new byte[signatureLength];
 			in.readBytes(signature);
+
+			int seqN = in.readInt();
+			int viewN = in.readInt();
  
 			
-			return new PrePrepareMessage(block, signature);
+			return new PrePrepareMessage(block, signature, seqN, viewN);
 		}
 		
 	};
