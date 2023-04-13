@@ -184,7 +184,7 @@ public class PBFTProtocol extends GenericProtocol {
 		
 
         
-		sendMessage(new PrePrepareMessage(request.getBlock(), request.getSignature()), self);
+		sendMessage(new PrePrepareMessage(request.getBlock(), request.getSignature(), seq, viewNumber), self);
         
 	
 		
