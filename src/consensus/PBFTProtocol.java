@@ -114,7 +114,7 @@ public class PBFTProtocol extends GenericProtocol {
         registerChannelEventHandler(peerChannel, OutConnectionFailed.EVENT_ID, this::uponOutConnectionFailed);
 		
         
-		logger.info("Standing by to extablish connections (10s)");
+		logger.info("Standing by to establish connections (10s)");
 		
 		try { Thread.sleep(10 * 1000); } catch (InterruptedException e) { }
 		
@@ -122,12 +122,11 @@ public class PBFTProtocol extends GenericProtocol {
 
 
 
-	 	//for (Host host : view) {
-		//	openConnection(host);
-
-		
-		
-		//}
+	 	for (Host host : view) {
+			//todo ignorar host se for a view selecionada
+			openConnection(host, peerChannel);
+			logger.info(String.format("Establishing connection to %s:%d", host.getAddress(), host.getPort()));
+		}
 		
 		
 		//Installing first view
