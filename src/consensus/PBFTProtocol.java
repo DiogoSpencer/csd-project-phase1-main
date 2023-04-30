@@ -28,7 +28,10 @@ import consensus.notifications.CommittedNotification;
 import consensus.notifications.ViewChange;
 import consensus.requests.ProposeRequest;
 import pt.unl.fct.di.novasys.babel.core.GenericProtocol;
+import pt.unl.fct.di.novasys.babel.generic.signed.NoSignaturePresentException;
+import pt.unl.fct.di.novasys.babel.generic.signed.InvalidFormatException;
 import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
+import pt.unl.fct.di.novasys.babel.generic.signed.InvalidSerializerException;
 import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
 import pt.unl.fct.di.novasys.channel.tcp.MultithreadedTCPChannel;
 import pt.unl.fct.di.novasys.channel.tcp.TCPChannel;
@@ -104,17 +107,20 @@ public class PBFTProtocol extends GenericProtocol {
 		
         //registerMessageHandler(peerChannel, ProposeRequest.REQUEST_ID, null);
 
-		registerRequestHandler(ProposeRequest.REQUEST_ID, this::handleProposeRequest);
 		registerMessageHandler(peerChannel, PrePrepareMessage.MESSAGE_ID , this::handlePrePrepareMessage, this::handleMessageFailed);
 		registerMessageSerializer(peerChannel, PrePrepareMessage.MESSAGE_ID, PrePrepareMessage.serializer);
 
-		registerMessageSerializer(peerChannel, PrepareMessage.MESSAGE_ID, PrepareMessage.serializer);
 		registerMessageHandler(peerChannel, PrepareMessage.MESSAGE_ID , this::handlePrepareMsg, this::handleMessageFailed);
+		registerMessageSerializer(peerChannel, PrepareMessage.MESSAGE_ID, PrepareMessage.serializer);
+
+		registerRequestHandler(ProposeRequest.REQUEST_ID, this::handleProposeRequest);
 		
 		registerChannelEventHandler(peerChannel, InConnectionDown.EVENT_ID, this::uponInConnectionDown);
         registerChannelEventHandler(peerChannel, InConnectionUp.EVENT_ID, this::uponInConnectionUp);
+
         registerChannelEventHandler(peerChannel, OutConnectionDown.EVENT_ID, this::uponOutConnectionDown);
         registerChannelEventHandler(peerChannel, OutConnectionUp.EVENT_ID, this::uponOutConnectionUp);
+
         registerChannelEventHandler(peerChannel, OutConnectionFailed.EVENT_ID, this::uponOutConnectionFailed);
 		
         
@@ -126,11 +132,17 @@ public class PBFTProtocol extends GenericProtocol {
 
 
 
-	 	for (Host host : view) {
-			//todo ignorar host se for a view selecionada
-			openConnection(host, peerChannel);
-			logger.info(String.format("Establishing connection to %s:%d", host.getAddress(), host.getPort()));
-		}
+		// TODO usar este bloco ou o bloco seguinte?
+	 	// for (Host host : view) {
+		// 	//todo ignorar host se for a view selecionada
+		// 	openConnection(host, peerChannel);
+		// 	logger.info(String.format("Establishing connection to %s:%d", host.getAddress(), host.getPort()));
+		// }
+
+		for(Host h: this.view) {
+			logger.info("Connecting to " + h);
+			openConnection(h);
+		}	
 		
 		
 		//Installing first view
