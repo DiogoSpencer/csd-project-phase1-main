@@ -105,7 +105,11 @@ public class PBFTProtocol extends GenericProtocol {
         //registerMessageHandler(peerChannel, ProposeRequest.REQUEST_ID, null);
 
 		registerRequestHandler(ProposeRequest.REQUEST_ID, this::handleProposeRequest);
-		registerMessageHandler(peerChannel, PrePrepareMessage.MESSAGE_ID, this::handlePrePrepareMessage);
+		registerMessageHandler(peerChannel, PrePrepareMessage.MESSAGE_ID , this::handlePrePrepareMessage, this::handleMessageFailed);
+		registerMessageSerializer(peerChannel, PrePrepareMessage.MESSAGE_ID, PrePrepareMessage.serializer);
+
+		registerMessageSerializer(peerChannel, PrepareMessage.MESSAGE_ID, PrepareMessage.serializer);
+		registerMessageHandler(peerChannel, PrepareMessage.MESSAGE_ID , this::handlePrepareMsg, this::handleMessageFailed);
 		
 		registerChannelEventHandler(peerChannel, InConnectionDown.EVENT_ID, this::uponInConnectionDown);
         registerChannelEventHandler(peerChannel, InConnectionUp.EVENT_ID, this::uponInConnectionUp);
@@ -144,55 +148,82 @@ public class PBFTProtocol extends GenericProtocol {
 
 		//Verify if the signature of the block is valid
 	 	try {
-
-			
-
-			
 		    if(SignaturesHelper.checkSignature(request.getBlock(), request.getSignature(), truststore.getCertificate(cryptoName).getPublicKey())){
+				PrePrepareMessage ppm = new PrePrepareMessage(cryptoName, request.getBlock(), request.getSignature(), 0, ++seq);
+				ppm.signMessage(key);
 
+				logger.info("Block signature verified for local entity (" + this.cryptoName + ")");
 
-				//Hashing the block
-				MessageDigest digest = MessageDigest.getInstance("SHA-256");
-				byte[] blockHash = digest.digest(request.getBlock());
-                byte[] signature = SignaturesHelper.generateSignature(blockHash, this.key);
+				for(Host h: this.view) {
+					if(!h.equals(self)) {
+						sendMessage(ppm, h);
+					}
+				}
+
+				//TODO is this signature generation necessary?
+				// //Hashing the block
+				// MessageDigest digest = MessageDigest.getInstance("SHA-256");
+				// byte[] blockHash = digest.digest(request.getBlock());
+                // byte[] signature = SignaturesHelper.generateSignature(blockHash, this.key);
 				
 
-				sendMessage(new PrePrepareMessage(blockHash, signature, seq, viewNumber), self);
-			}else{
-				//signature is invalid
-				logger.info("Signature invalid");
+				// sendMessage(new PrePrepareMessage(blockHash, signature, seq, viewNumber), self);
+			} else {
+				logger.warn("Received ProposeRequest with invalid block signature.");
 			}
-        
-			  
-		} catch (InvalidKeyException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (SignatureException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (NoSuchAlgorithmException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (KeyStoreException e) {
-			// TODO Auto-generated catch block
+		} catch (InvalidKeyException | SignatureException | NoSuchAlgorithmException | KeyStoreException | InvalidSerializerException e) {
 			e.printStackTrace();
 		}
-
-		
-		
-		
-
-        
-		sendMessage(new PrePrepareMessage(request.getBlock(), request.getSignature(), seq, viewNumber), self);
-        
-	
-		
     }
 
 	private void handlePrePrepareMessage(PrePrepareMessage msg, Host from, short sourceProto, int channel){
+		logger.info("Received a PrePrepareMessage from " + msg.getSender() + "<" + from + ">  with view "
+				+ " number " + msg.getViewNumber() + " and sequence number " + msg.getSeqNumber());
 
+		
+		try {
+			PublicKey senderPublicKey = truststore.getCertificate(msg.getSender()).getPublicKey();
+
+			if(msg.checkSignature(senderPublicKey)) {
+				
+				logger.info("Verified the message signature successfully for entity: " + msg.getSender());
+				
+				if(SignaturesHelper.checkSignature(msg.getBlock(), msg.getBlockSignature(), senderPublicKey )) {
+
+					logger.info("Verified the block signature successfully for entity: " + msg.getSender());
+					
+					PrepareMessage pm = new PrepareMessage(cryptoName, msg.getSender(), msg.getBlock(), msg.getBlockSignature(), msg.getViewNumber(), msg.getSeqNumber());
+					pm.signMessage(key);
+
+					for(Host h: this.view) {
+						if(!h.equals(self)) {
+							sendMessage(pm, h);
+						}
+					}
+
+				} else {
+					logger.warn("Received PrePrepareMessage from "+ msg.getSender() + "<" + from + "> with invalid block signature");
+				}
+			} else {
+				logger.warn("Reveived PrePrepareMessage from "+ msg.getSender() + "<" + from + "> with invalid meesge signature.");
+			}
+		} catch (InvalidKeyException | NoSuchAlgorithmException | SignatureException | InvalidFormatException
+				| NoSignaturePresentException | InvalidSerializerException | KeyStoreException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		} 	
+	}
+
+	private void handlePrepareMsg(PrepareMessage msg, Host from, short sourceProto, int channel) {
+		logger.info("Received a PrepareMessage from " + msg.getSender() + "<" + from + "> containing "
+				+ "a block signed by " + msg.getBlockSender() + " with view number " + msg.getViewNumber()
+				+ " and sequence number " + msg.getSeqNumber());
 	}
 	
+	private void handleMessageFailed(ProtoMessage msg, Host host, short i, Throwable throwable, int i1) {
+		logger.warn("Failed: " + msg + ", to: " + host + ", reason: " + throwable.getMessage());
+	}
+
 	/* --------------------------------------- Connection Manager Functions ----------------------------------- */
 	
     private void uponOutConnectionUp(OutConnectionUp event, int channel) {
