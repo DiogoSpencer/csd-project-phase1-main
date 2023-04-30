@@ -10,71 +10,75 @@ public class PrePrepareMessage extends SignedProtoMessage {
 
 	public final static short MESSAGE_ID = 101;
 	
-	//TODO: Define here the elements of the message
-	private final byte[] block;
-	private final byte[] signature;
-	private final int seqN;
-	private final int viewN;
+	private String sender;
+	private byte[] block;
+	private byte[] blockSignature;
+	private int viewNumber;
+	private int seqNumber;
 	
-	public PrePrepareMessage(byte[] block, byte[] signature, int seqN, int viewN) {
+	public PrePrepareMessage(String sender, byte[] b, byte[] sig, int v, int n) {
 		super(PrePrepareMessage.MESSAGE_ID);
-		this.block = block;
-		this.signature = signature;
-		this.seqN = seqN;
-		this.viewN = viewN;
+		this.sender = sender;
+		this.block = b;
+		this.blockSignature = sig;
+		this.viewNumber = v;
+		this.seqNumber = n;	
 	}
 
 	public static SignedMessageSerializer<PrePrepareMessage> serializer = new SignedMessageSerializer<PrePrepareMessage>() {
 
 		@Override
 		public void serializeBody(PrePrepareMessage signedProtoMessage, ByteBuf out) throws IOException {
-			// TODO Auto-generated method stub, you should implement this method.
-			// Write the length of the block array as a 4-byte integer
+			out.writeShort(signedProtoMessage.sender.length());
+			out.writeBytes(signedProtoMessage.sender.getBytes());
 			out.writeInt(signedProtoMessage.block.length);
-
-			// Write the block array
 			out.writeBytes(signedProtoMessage.block);
-	
-			// Write the length of the signature array as a 4-byte integer
-			out.writeInt(signedProtoMessage.signature.length);
-	
-			// Write the signature array
-			out.writeBytes(signedProtoMessage.signature);
-
-			out.writeInt(signedProtoMessage.seqN);
-
-			out.writeInt(signedProtoMessage.viewN);
-
-		   
-			
+			out.writeShort(signedProtoMessage.blockSignature.length);
+			out.writeBytes(signedProtoMessage.blockSignature);	
+			out.writeInt(signedProtoMessage.viewNumber);
+			out.writeInt(signedProtoMessage.seqNumber);
 		}
 
 		@Override
 		public PrePrepareMessage deserializeBody(ByteBuf in) throws IOException {
-			// TODO Auto-generated method stub, you should implement this method.
-
-            // Read the length of the block array as a 4-byte integer
-			int blockLength = in.readInt();
-
-			// Read the block array
-			byte[] block = new byte[blockLength];
-			in.readBytes(block);
-	
-			// Read the length of the signature array as a 4-byte integer
-			int signatureLength = in.readInt();
-	
-			// Read the signature array
-			byte[] signature = new byte[signatureLength];
-			in.readBytes(signature);
-
-			int seqN = in.readInt();
-			int viewN = in.readInt();
- 
+			short s = in.readShort();
+			byte[] c = new byte[s];
+			in.readBytes(c);
+			String sender = new String(c);
+			int bsize = in.readInt();
+			byte[] b = new byte[bsize];
+			in.readBytes(b);
+			s = in.readShort();
+			byte[] sig = new byte[s];
+			in.readBytes(sig);
+			int v = in.readInt();
+			int n = in.readInt();
 			
-			return new PrePrepareMessage(block, signature, seqN, viewN);
+			return new PrePrepareMessage(sender, b, sig, v, n);
 		}
 		
 	};
+	
+	public String getSender() {
+		return sender;
+	}
+	
+	public byte[] getBlock() {
+		return block;
+	}
+
+	public byte[] getBlockSignature() {
+		return blockSignature;
+	}
+
+
+	public int getViewNumber() {
+		return viewNumber;
+	}
+
+	public int getSeqNumber() {
+		return seqNumber;
+	}
 	
 	@Override
 	public SignedMessageSerializer<? extends SignedProtoMessage> getSerializer() {
