@@ -157,67 +157,80 @@ public class PBFTProtocol extends GenericProtocol {
 	}
 
 	private void handleProposeRequest(ProposeRequest request, short from) {
+		int nodeId = Integer.parseInt(cryptoName.replace("node", ""));
+		if(viewNumber == nodeId) {
+			logger.info(String.format("Received a propose request with a block, on %s", cryptoName));
+			try {
+				//Verify if the signature of the block is valid
+				if(SignaturesHelper.checkSignature(request.getBlock(), request.getSignature(), truststore.getCertificate(cryptoName).getPublicKey())){
+					PrePrepareMessage ppm = new PrePrepareMessage(cryptoName, request.getBlock(), request.getSignature(), viewNumber, ++seq);
+					ppm.signMessage(key);
 
-		//Verify if the signature of the block is valid
-	 	try {
-		    if(SignaturesHelper.checkSignature(request.getBlock(), request.getSignature(), truststore.getCertificate(cryptoName).getPublicKey())){
-				PrePrepareMessage ppm = new PrePrepareMessage(cryptoName, request.getBlock(), request.getSignature(), 0, ++seq);
-				ppm.signMessage(key);
+					logger.info("Block signature verified for local entity (" + this.cryptoName + ")");
 
-				logger.info("Block signature verified for local entity (" + this.cryptoName + ")");
-
-				for(Host h: this.view) {
-					if(!h.equals(self)) {
-						sendMessage(ppm, h);
+					for(Host h: this.view) {
+						if(!h.equals(self)) {
+							sendMessage(ppm, h);
+						}
 					}
+
+					//TODO is this signature generation necessary?
+					// //Hashing the block
+					// MessageDigest digest = MessageDigest.getInstance("SHA-256");
+					// byte[] blockHash = digest.digest(request.getBlock());
+					// byte[] signature = SignaturesHelper.generateSignature(blockHash, this.key);
+					
+
+					// sendMessage(new PrePrepareMessage(blockHash, signature, seq, viewNumber), self);
+				} else {
+					logger.warn("Received ProposeRequest with invalid block signature.");
 				}
-
-				//TODO is this signature generation necessary?
-				// //Hashing the block
-				// MessageDigest digest = MessageDigest.getInstance("SHA-256");
-				// byte[] blockHash = digest.digest(request.getBlock());
-                // byte[] signature = SignaturesHelper.generateSignature(blockHash, this.key);
-				
-
-				// sendMessage(new PrePrepareMessage(blockHash, signature, seq, viewNumber), self);
-			} else {
-				logger.warn("Received ProposeRequest with invalid block signature.");
+			} catch (InvalidKeyException | SignatureException | NoSuchAlgorithmException | KeyStoreException | InvalidSerializerException e) {
+				e.printStackTrace();
 			}
-		} catch (InvalidKeyException | SignatureException | NoSuchAlgorithmException | KeyStoreException | InvalidSerializerException e) {
-			e.printStackTrace();
 		}
+
     }
 
 	private void handlePrePrepareMessage(PrePrepareMessage msg, Host from, short sourceProto, int channel){
+		int seqN = msg.getSeqNumber();
+		int viewN = msg.getViewNumber();
 		logger.info("Received a PrePrepareMessage from " + msg.getSender() + "<" + from + ">  with view "
-				+ " number " + msg.getViewNumber() + " and sequence number " + msg.getSeqNumber());
+				+ " number " + msg.getViewNumber() + " and sequence number " + seqN);
 
 		
 		try {
 			PublicKey senderPublicKey = truststore.getCertificate(msg.getSender()).getPublicKey();
 
-			if(msg.checkSignature(senderPublicKey)) {
-				
-				logger.info("Verified the message signature successfully for entity: " + msg.getSender());
-				
-				if(SignaturesHelper.checkSignature(msg.getBlock(), msg.getBlockSignature(), senderPublicKey )) {
+			if (this.viewNumber == viewN) {
+				if (this.seq < seqN) {
+					if(msg.checkSignature(senderPublicKey)) {
+						
+						logger.info("Verified the message signature successfully for entity: " + msg.getSender());
+						
+						if(SignaturesHelper.checkSignature(msg.getBlock(), msg.getBlockSignature(), senderPublicKey )) {
 
-					logger.info("Verified the block signature successfully for entity: " + msg.getSender());
-					
-					PrepareMessage pm = new PrepareMessage(cryptoName, msg.getSender(), msg.getBlock(), msg.getBlockSignature(), msg.getViewNumber(), msg.getSeqNumber());
-					pm.signMessage(key);
+							logger.info("Verified the block signature successfully for entity: " + msg.getSender());
+							
+							PrepareMessage pm = new PrepareMessage(cryptoName, msg.getSender(), msg.getBlock(), msg.getBlockSignature(), msg.getViewNumber(), msg.getSeqNumber());
+							pm.signMessage(key);
 
-					for(Host h: this.view) {
-						if(!h.equals(self)) {
-							sendMessage(pm, h);
+							for(Host h: this.view) {
+								if(!h.equals(self)) {
+									sendMessage(pm, h);
+								}
+							} 
+						} else {
+							logger.warn("Received PrePrepareMessage from "+ msg.getSender() + "<" + from + "> with invalid block signature");
 						}
+					} else {
+						logger.warn("Reveived PrePrepareMessage from "+ msg.getSender() + "<" + from + "> with invalid message signature.");
 					}
-
 				} else {
-					logger.warn("Received PrePrepareMessage from "+ msg.getSender() + "<" + from + "> with invalid block signature");
+					logger.warn("Received PrePrepareMessage from "+ msg.getSender() + "<" + from + "> with invalid Sequence Number");
 				}
 			} else {
-				logger.warn("Reveived PrePrepareMessage from "+ msg.getSender() + "<" + from + "> with invalid meesge signature.");
+					logger.warn("Received PrePrepareMessage from "+ msg.getSender() + "<" + from + "> with invalid View Number");
 			}
 		} catch (InvalidKeyException | NoSuchAlgorithmException | SignatureException | InvalidFormatException
 				| NoSignaturePresentException | InvalidSerializerException | KeyStoreException e) {
