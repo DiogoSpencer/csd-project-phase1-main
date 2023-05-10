@@ -14,11 +14,12 @@ import java.security.SignatureException;
 import java.security.UnrecoverableKeyException;
 import java.security.cert.CertificateException;
 import java.util.Enumeration;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Properties;
 import java.util.Random;
-
+import java.util.Map;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -29,6 +30,7 @@ import consensus.messages.PrepareMessage;
 import consensus.notifications.CommittedNotification;
 import consensus.notifications.ViewChange;
 import consensus.requests.ProposeRequest;
+import javafx.util.Pair;
 import pt.unl.fct.di.novasys.babel.core.GenericProtocol;
 import pt.unl.fct.di.novasys.babel.generic.signed.NoSignaturePresentException;
 import pt.unl.fct.di.novasys.babel.generic.signed.InvalidFormatException;
@@ -65,14 +67,18 @@ public class PBFTProtocol extends GenericProtocol {
 	private Host self;
 	private int viewNumber;
 	private final List<Host> view;
-	private int seq, prepareCounter, commitCounter;
+
+	private Map<byte[], Integer> prepareMap = new HashMap<>();
+	private Map.Entry<byte[], Integer> popularPrepare;
+
+	private int seq;
 
 	public PBFTProtocol(Properties props) throws NumberFormatException, UnknownHostException {
 		super(PBFTProtocol.PROTO_NAME, PBFTProtocol.PROTO_ID);
 
 		this.seq = 0;
-		this.prepareCounter= 0;
-		this.commitCounter= 0;
+		this.prepareMap = new HashMap<>();
+		this.popularPrepare = new HashMap.SimpleEntry<>(new byte[0], 0);
 
 
 		self = new Host(InetAddress.getByName(props.getProperty(ADDRESS_KEY)),
@@ -232,6 +238,7 @@ public class PBFTProtocol extends GenericProtocol {
 									sendMessage(pm, h);
 								}
 							}
+							this.seq = msg.getSeqNumber();
 						} else {
 							logger.warn("Received PrePrepareMessage from " + msg.getSender() + "<" + from
 									+ "> with invalid block signature");
@@ -269,22 +276,45 @@ public class PBFTProtocol extends GenericProtocol {
 
 				try {
 					PublicKey senderPublicKey = truststore.getCertificate(msg.getSender()).getPublicKey();
+					PublicKey blockSenderPublicKey = truststore.getCertificate(msg.getBlockSender()).getPublicKey();
 		
 					if (this.viewNumber == viewN) {
-						if (this.seq < seqN) {
+						if (this.seq == seqN) {
 							if(msg.checkSignature(senderPublicKey)) {
 
 								logger.info("Verified the message signature successfully for entity: " + msg.getSender());
 						
-						if(SignaturesHelper.checkSignature(msg.getBlock(), msg.getBlockSignature(), senderPublicKey )) {
+						if(SignaturesHelper.checkSignature(msg.getBlock(), msg.getBlockSignature(), blockSenderPublicKey )) {
 
-							prepareCounter++;
+							byte[] mapKey = msg.getBlockSignature();
+							// TODO remove these logs after fixing issue
+							// Commit messages are not being sent because BlockSignature is somehow always different
+							logger.warn("BOOOOOOOOOOOOOOOLEAN");
+							logger.warn(prepareMap.containsKey(mapKey));
+							logger.warn(mapKey);
+							logger.warn(msg.getBlockSender());
+							logger.warn(msg.getSender());
+							if(prepareMap.containsKey(mapKey)) {
+								int currValue = prepareMap.get(mapKey);
+								prepareMap.put(mapKey, ++currValue);
+
+								if(popularPrepare.getValue() < currValue) {
+									popularPrepare = new HashMap.SimpleEntry<>(mapKey, currValue);
+								}
+							} else {
+								prepareMap.put(mapKey, 1);
+								if(popularPrepare.getValue() == 0) {
+									popularPrepare = new HashMap.SimpleEntry<>(mapKey, 1);
+								}
+							}
+
 							logger.info("Verified the block signature successfully for entity: " + msg.getSender());
 							
-							int numberOfPrepares = 2*(view.size()/3) + 1;
-							if(prepareCounter >= numberOfPrepares){
+							int necessaryPrepares = 2*(view.size()/3) + 1;
+							int currPrepares = prepareMap.get(mapKey);
 
-								
+
+							if(currPrepares >= necessaryPrepares) {
 								CommitMessage cm = new CommitMessage(cryptoName, msg.getSender(), msg.getBlock(), msg.getBlockSignature(), msg.getViewNumber(), msg.getSeqNumber());
 								cm.signMessage(key);
 
@@ -293,7 +323,8 @@ public class PBFTProtocol extends GenericProtocol {
 										sendMessage(cm, h);
 									}
 								}
-								prepareCounter = 0;
+
+								logger.info("Sent a commit message from node " + cryptoName + " prepareCounter: <" + currPrepares + ">");
 							} 
 						} else {
 							logger.warn("Received PrepareMessage from " + msg.getSender() + "<" + from
@@ -306,6 +337,7 @@ public class PBFTProtocol extends GenericProtocol {
 				} else {
 					logger.warn("Received PrepareMessage from " + msg.getSender() + "<" + from
 							+ "> with invalid Sequence Number");
+					logger.warn(String.format("Current sequence number: %d, Received Sequence Number: %d", this.seq, seqN));
 				}
 			} else {
 				logger.warn("Received PrepareMessage from " + msg.getSender() + "<" + from
