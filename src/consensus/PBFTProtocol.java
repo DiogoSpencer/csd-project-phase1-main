@@ -324,7 +324,10 @@ public class PBFTProtocol extends GenericProtocol {
 
 
 
-	private void handleCommitMsg(PrepareMessage msg, Host from, short sourceProto, int channel) {
+	private void handleCommitMsg(CommitMessage msg, Host from, short sourceProto, int channel) {
+		logger.info("Received a CommitMessage from " + msg.getSender() + "<" + from + "> containing "
+				+ "a block signed by " + msg.getBlockSender() + " with view number " + msg.getViewNumber()
+				+ " and sequence number " + msg.getSeqNumber());
 
 
 		
