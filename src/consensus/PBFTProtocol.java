@@ -19,9 +19,11 @@ import java.util.List;
 import java.util.Properties;
 import java.util.Random;
 
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import consensus.messages.CommitMessage;
 import consensus.messages.PrePrepareMessage;
 import consensus.messages.PrepareMessage;
 import consensus.notifications.CommittedNotification;
@@ -44,37 +46,38 @@ import pt.unl.fct.di.novasys.network.data.Host;
 import utils.Crypto;
 import utils.SignaturesHelper;
 
-
 public class PBFTProtocol extends GenericProtocol {
 
 	public static final String PROTO_NAME = "pbft";
 	public static final short PROTO_ID = 100;
-	
+
 	public static final String ADDRESS_KEY = "address";
 	public static final String PORT_KEY = "base_port";
 	public static final String INITIAL_MEMBERSHIP_KEY = "initial_membership";
 
 	private static final Logger logger = LogManager.getLogger(PBFTProtocol.class);
-	
+
 	private String cryptoName;
 	private KeyStore truststore;
 	private PrivateKey key;
-	
-	//TODO: add protocol state (related with the internal operation of the view)
+
+	// TODO: add protocol state (related with the internal operation of the view)
 	private Host self;
 	private int viewNumber;
 	private final List<Host> view;
-	private int seq;
-	
-	
+	private int seq, prepareCounter, commitCounter;
+
 	public PBFTProtocol(Properties props) throws NumberFormatException, UnknownHostException {
 		super(PBFTProtocol.PROTO_NAME, PBFTProtocol.PROTO_ID);
-	
+
 		this.seq = 0;
+		this.prepareCounter= 0;
+		this.commitCounter= 0;
+
 
 		self = new Host(InetAddress.getByName(props.getProperty(ADDRESS_KEY)),
 				Integer.parseInt(props.getProperty(PORT_KEY)));
-		
+
 		viewNumber = 1;
 		view = new LinkedList<>();
 		String[] membership = props.getProperty(INITIAL_MEMBERSHIP_KEY).split(",");
@@ -100,181 +103,263 @@ public class PBFTProtocol extends GenericProtocol {
 		peerProps.put(MultithreadedTCPChannel.ADDRESS_KEY, props.getProperty(ADDRESS_KEY));
 		peerProps.setProperty(TCPChannel.PORT_KEY, props.getProperty(PORT_KEY));
 		int peerChannel = createChannel(TCPChannel.NAME, peerProps);
-		
-		// TODO: Must add handlers for requests and messages and register message serializers
 
+		// TODO: Must add handlers for requests and messages and register message
+		// serializers
 
-		
-        //registerMessageHandler(peerChannel, ProposeRequest.REQUEST_ID, null);
+		// registerMessageHandler(peerChannel, ProposeRequest.REQUEST_ID, null);
 
-		registerMessageHandler(peerChannel, PrePrepareMessage.MESSAGE_ID , this::handlePrePrepareMessage, this::handleMessageFailed);
+		registerMessageHandler(peerChannel, PrePrepareMessage.MESSAGE_ID, this::handlePrePrepareMessage,
+				this::handleMessageFailed);
 		registerMessageSerializer(peerChannel, PrePrepareMessage.MESSAGE_ID, PrePrepareMessage.serializer);
 
-		registerMessageHandler(peerChannel, PrepareMessage.MESSAGE_ID , this::handlePrepareMsg, this::handleMessageFailed);
+		registerMessageHandler(peerChannel, PrepareMessage.MESSAGE_ID, this::handlePrepareMsg,
+				this::handleMessageFailed);
 		registerMessageSerializer(peerChannel, PrepareMessage.MESSAGE_ID, PrepareMessage.serializer);
 
+		registerMessageHandler(peerChannel, CommitMessage.MESSAGE_ID, this::handleCommitMsg,
+				this::handleMessageFailed);
+		registerMessageSerializer(peerChannel, CommitMessage.MESSAGE_ID, CommitMessage.serializer);
+
 		registerRequestHandler(ProposeRequest.REQUEST_ID, this::handleProposeRequest);
-		
+
 		registerChannelEventHandler(peerChannel, InConnectionDown.EVENT_ID, this::uponInConnectionDown);
-        registerChannelEventHandler(peerChannel, InConnectionUp.EVENT_ID, this::uponInConnectionUp);
+		registerChannelEventHandler(peerChannel, InConnectionUp.EVENT_ID, this::uponInConnectionUp);
 
-        registerChannelEventHandler(peerChannel, OutConnectionDown.EVENT_ID, this::uponOutConnectionDown);
-        registerChannelEventHandler(peerChannel, OutConnectionUp.EVENT_ID, this::uponOutConnectionUp);
+		registerChannelEventHandler(peerChannel, OutConnectionDown.EVENT_ID, this::uponOutConnectionDown);
+		registerChannelEventHandler(peerChannel, OutConnectionUp.EVENT_ID, this::uponOutConnectionUp);
 
-        registerChannelEventHandler(peerChannel, OutConnectionFailed.EVENT_ID, this::uponOutConnectionFailed);
-		
-        
+		registerChannelEventHandler(peerChannel, OutConnectionFailed.EVENT_ID, this::uponOutConnectionFailed);
+
 		logger.info("Standing by to establish connections (10s)");
-		
-		try { Thread.sleep(10 * 1000); } catch (InterruptedException e) { }
-		
-		// TODO: Open connections to all nodes in the (initial) view 
 
+		try {
+			Thread.sleep(10 * 1000);
+		} catch (InterruptedException e) {
+		}
 
+		// TODO: Open connections to all nodes in the (initial) view
 
 		// TODO usar este bloco ou o bloco seguinte?
-	 	// for (Host host : view) {
-		// 	//todo ignorar host se for a view selecionada
-		// 	openConnection(host, peerChannel);
-		// 	logger.info(String.format("Establishing connection to %s:%d", host.getAddress(), host.getPort()));
+		// for (Host host : view) {
+		// //todo ignorar host se for a view selecionada
+		// openConnection(host, peerChannel);
+		// logger.info(String.format("Establishing connection to %s:%d",
+		// host.getAddress(), host.getPort()));
 		// }
 
-		for(Host h: this.view) {
+		for (Host h : this.view) {
 			logger.info("Connecting to " + h);
 			openConnection(h);
-		}	
-		
-		
-		//Installing first view
+		}
+
+		// Installing first view
 		triggerNotification(new ViewChange(view, viewNumber));
 	}
-	
-	//TODO: Add event (messages, requests, timers, notifications) handlers of the protocol
 
-	private void uponPropose(ProposeRequest msg, Host from){
-		//sendMessage(msg, channel);
+	// TODO: Add event (messages, requests, timers, notifications) handlers of the
+	// protocol
+
+	private void uponPropose(ProposeRequest msg, Host from) {
+		// sendMessage(msg, channel);
 
 	}
 
 	private void handleProposeRequest(ProposeRequest request, short from) {
 		int nodeId = Integer.parseInt(cryptoName.replace("node", ""));
-		if(viewNumber == nodeId) {
+		if (viewNumber == nodeId) {
 			logger.info(String.format("Received a propose request with a block, on %s", cryptoName));
 			try {
-				//Verify if the signature of the block is valid
-				if(SignaturesHelper.checkSignature(request.getBlock(), request.getSignature(), truststore.getCertificate(cryptoName).getPublicKey())){
-					PrePrepareMessage ppm = new PrePrepareMessage(cryptoName, request.getBlock(), request.getSignature(), viewNumber, ++seq);
+				// Verify if the signature of the block is valid
+				if (SignaturesHelper.checkSignature(request.getBlock(), request.getSignature(),
+						truststore.getCertificate(cryptoName).getPublicKey())) {
+					PrePrepareMessage ppm = new PrePrepareMessage(cryptoName, request.getBlock(),
+							request.getSignature(), viewNumber, ++seq);
 					ppm.signMessage(key);
 
 					logger.info("Block signature verified for local entity (" + this.cryptoName + ")");
 
-					for(Host h: this.view) {
-						if(!h.equals(self)) {
+					for (Host h : this.view) {
+						if (!h.equals(self)) {
 							sendMessage(ppm, h);
 						}
 					}
 
-					//TODO is this signature generation necessary?
+					// TODO is this signature generation necessary?
 					// //Hashing the block
 					// MessageDigest digest = MessageDigest.getInstance("SHA-256");
 					// byte[] blockHash = digest.digest(request.getBlock());
 					// byte[] signature = SignaturesHelper.generateSignature(blockHash, this.key);
-					
 
-					// sendMessage(new PrePrepareMessage(blockHash, signature, seq, viewNumber), self);
+					// sendMessage(new PrePrepareMessage(blockHash, signature, seq, viewNumber),
+					// self);
 				} else {
 					logger.warn("Received ProposeRequest with invalid block signature.");
 				}
-			} catch (InvalidKeyException | SignatureException | NoSuchAlgorithmException | KeyStoreException | InvalidSerializerException e) {
+			} catch (InvalidKeyException | SignatureException | NoSuchAlgorithmException | KeyStoreException
+					| InvalidSerializerException e) {
 				e.printStackTrace();
 			}
 		}
 
-    }
+	}
 
-	private void handlePrePrepareMessage(PrePrepareMessage msg, Host from, short sourceProto, int channel){
+	private void handlePrePrepareMessage(PrePrepareMessage msg, Host from, short sourceProto, int channel) {
 		int seqN = msg.getSeqNumber();
 		int viewN = msg.getViewNumber();
 		logger.info("Received a PrePrepareMessage from " + msg.getSender() + "<" + from + ">  with view "
 				+ " number " + msg.getViewNumber() + " and sequence number " + seqN);
 
-		
 		try {
 			PublicKey senderPublicKey = truststore.getCertificate(msg.getSender()).getPublicKey();
 
 			if (this.viewNumber == viewN) {
 				if (this.seq < seqN) {
-					if(msg.checkSignature(senderPublicKey)) {
-						
+					if (msg.checkSignature(senderPublicKey)) {
+
 						logger.info("Verified the message signature successfully for entity: " + msg.getSender());
-						
-						if(SignaturesHelper.checkSignature(msg.getBlock(), msg.getBlockSignature(), senderPublicKey )) {
+
+						if (SignaturesHelper.checkSignature(msg.getBlock(), msg.getBlockSignature(), senderPublicKey)) {
 
 							logger.info("Verified the block signature successfully for entity: " + msg.getSender());
-							
-							PrepareMessage pm = new PrepareMessage(cryptoName, msg.getSender(), msg.getBlock(), msg.getBlockSignature(), msg.getViewNumber(), msg.getSeqNumber());
+
+							PrepareMessage pm = new PrepareMessage(cryptoName, msg.getSender(), msg.getBlock(),
+									msg.getBlockSignature(), msg.getViewNumber(), msg.getSeqNumber());
 							pm.signMessage(key);
 
-							for(Host h: this.view) {
-								if(!h.equals(self)) {
+							for (Host h : this.view) {
+								if (!h.equals(self)) {
 									sendMessage(pm, h);
 								}
-							} 
+							}
 						} else {
-							logger.warn("Received PrePrepareMessage from "+ msg.getSender() + "<" + from + "> with invalid block signature");
+							logger.warn("Received PrePrepareMessage from " + msg.getSender() + "<" + from
+									+ "> with invalid block signature");
 						}
 					} else {
-						logger.warn("Reveived PrePrepareMessage from "+ msg.getSender() + "<" + from + "> with invalid message signature.");
+						logger.warn("Reveived PrePrepareMessage from " + msg.getSender() + "<" + from
+								+ "> with invalid message signature.");
 					}
 				} else {
-					logger.warn("Received PrePrepareMessage from "+ msg.getSender() + "<" + from + "> with invalid Sequence Number");
+					logger.warn("Received PrePrepareMessage from " + msg.getSender() + "<" + from
+							+ "> with invalid Sequence Number");
 				}
 			} else {
-					logger.warn("Received PrePrepareMessage from "+ msg.getSender() + "<" + from + "> with invalid View Number");
+				logger.warn("Received PrePrepareMessage from " + msg.getSender() + "<" + from
+						+ "> with invalid View Number");
 			}
 		} catch (InvalidKeyException | NoSuchAlgorithmException | SignatureException | InvalidFormatException
 				| NoSignaturePresentException | InvalidSerializerException | KeyStoreException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
-		} 	
+		}
 	}
 
 	private void handlePrepareMsg(PrepareMessage msg, Host from, short sourceProto, int channel) {
+		int seqN = msg.getSeqNumber();
+		int viewN = msg.getViewNumber();
+
+
+
 		logger.info("Received a PrepareMessage from " + msg.getSender() + "<" + from + "> containing "
 				+ "a block signed by " + msg.getBlockSender() + " with view number " + msg.getViewNumber()
 				+ " and sequence number " + msg.getSeqNumber());
+
+
+
+				try {
+					PublicKey senderPublicKey = truststore.getCertificate(msg.getSender()).getPublicKey();
+		
+					if (this.viewNumber == viewN) {
+						if (this.seq < seqN) {
+							if(msg.checkSignature(senderPublicKey)) {
+
+								logger.info("Verified the message signature successfully for entity: " + msg.getSender());
+						
+						if(SignaturesHelper.checkSignature(msg.getBlock(), msg.getBlockSignature(), senderPublicKey )) {
+
+							prepareCounter++;
+							logger.info("Verified the block signature successfully for entity: " + msg.getSender());
+							
+							int numberOfPrepares = 2*(view.size()/3) + 1;
+							if(prepareCounter >= numberOfPrepares){
+
+								
+								CommitMessage cm = new CommitMessage(cryptoName, msg.getSender(), msg.getBlock(), msg.getBlockSignature(), msg.getViewNumber(), msg.getSeqNumber());
+								cm.signMessage(key);
+
+								for(Host h: this.view) {
+									if(!h.equals(self)) {
+										sendMessage(cm, h);
+									}
+								}
+								prepareCounter = 0;
+							} 
+						} else {
+							logger.warn("Received PrepareMessage from " + msg.getSender() + "<" + from
+									+ "> with invalid block signature");
+						}
+					} else {
+						logger.warn("Reveived PrepareMessage from " + msg.getSender() + "<" + from
+								+ "> with invalid message signature.");
+					}
+				} else {
+					logger.warn("Received PrepareMessage from " + msg.getSender() + "<" + from
+							+ "> with invalid Sequence Number");
+				}
+			} else {
+				logger.warn("Received PrepareMessage from " + msg.getSender() + "<" + from
+						+ "> with invalid View Number");
+			}
+				}catch (InvalidKeyException | NoSuchAlgorithmException | SignatureException | InvalidFormatException
+								| NoSignaturePresentException | InvalidSerializerException | KeyStoreException e) {
+							// TODO Auto-generated catch block
+							e.printStackTrace();
+						} 	
+
+
+
+
 	}
-	
+
+
+
+	private void handleCommitMsg(PrepareMessage msg, Host from, short sourceProto, int channel) {
+
+
+		
+	}
+
+
 	private void handleMessageFailed(ProtoMessage msg, Host host, short i, Throwable throwable, int i1) {
 		logger.warn("Failed: " + msg + ", to: " + host + ", reason: " + throwable.getMessage());
 	}
 
-	/* --------------------------------------- Connection Manager Functions ----------------------------------- */
-	
-    private void uponOutConnectionUp(OutConnectionUp event, int channel) {
-        logger.info(event);
-		
-    }
+	/*
+	 * --------------------------------------- Connection Manager Functions
+	 * -----------------------------------
+	 */
 
-    private void uponOutConnectionDown(OutConnectionDown event, int channel) {
-        logger.warn(event);
-    }
+	private void uponOutConnectionUp(OutConnectionUp event, int channel) {
+		logger.info(event);
 
-    private void uponOutConnectionFailed(OutConnectionFailed<ProtoMessage> ev, int ch) {
-    	logger.warn(ev); 
-    	openConnection(ev.getNode());
-    }
+	}
 
-    private void uponInConnectionUp(InConnectionUp event, int channel) {
-        logger.info(event);
-    }
+	private void uponOutConnectionDown(OutConnectionDown event, int channel) {
+		logger.warn(event);
+	}
 
-    private void uponInConnectionDown(InConnectionDown event, int channel) {
-        logger.warn(event);
-    }
+	private void uponOutConnectionFailed(OutConnectionFailed<ProtoMessage> ev, int ch) {
+		logger.warn(ev);
+		openConnection(ev.getNode());
+	}
 
-	
+	private void uponInConnectionUp(InConnectionUp event, int channel) {
+		logger.info(event);
+	}
 
-	
-		
+	private void uponInConnectionDown(InConnectionDown event, int channel) {
+		logger.warn(event);
+	}
+
 }
