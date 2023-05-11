@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Properties;
 import java.util.Random;
 import java.util.Map;
+import java.util.Objects;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -30,9 +31,12 @@ import consensus.messages.PrepareMessage;
 import consensus.notifications.CommittedNotification;
 import consensus.notifications.ViewChange;
 import consensus.requests.ProposeRequest;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled.*;
 import javafx.util.Pair;
 import pt.unl.fct.di.novasys.babel.core.GenericProtocol;
 import pt.unl.fct.di.novasys.babel.generic.signed.NoSignaturePresentException;
+import pt.unl.fct.di.novasys.babel.generic.signed.SignedProtoMessage;
 import pt.unl.fct.di.novasys.babel.generic.signed.InvalidFormatException;
 import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
 import pt.unl.fct.di.novasys.babel.generic.signed.InvalidSerializerException;
@@ -184,10 +188,26 @@ public class PBFTProtocol extends GenericProtocol {
 					ppm.signMessage(key);
 
 					logger.info("Block signature verified for local entity (" + this.cryptoName + ")");
-
+					logger.info("PROPOSE REQUEST RECEIVES FOLLOWING BLOCK:");
+					logger.warn(request.getBlock());
+					
+					// MessageDigest digest = MessageDigest.getInstance("SHA-256");
+					// digest.digest(((byte[]) request));
+					// byte[] proposeHash = Objects.hash(ppm);
+					// ByteBuf out = new ByteBuf();
+					// ByteBuf buf = ByteBuf.buffer(128);
+					int ppmCount = 0;
 					for (Host h : this.view) {
 						if (!h.equals(self)) {
+
+							logger.info("HANDLE PROPOSE REQUEST SENDS FOLLOWING BLOCK:");
+							logger.info(ppm.getBlock());
+							logger.info(String.format("PPMMMM SENT %d TIMES", ppmCount++));
+							// logger.info(ppm.getSerializer().serializeBody(((SignedProtoMessage) ppm), buf));
+
+							// ppm.getSerializer().serializeBody(ppm, out);
 							sendMessage(ppm, h);
+
 						}
 					}
 
@@ -228,6 +248,8 @@ public class PBFTProtocol extends GenericProtocol {
 						if (SignaturesHelper.checkSignature(msg.getBlock(), msg.getBlockSignature(), senderPublicKey)) {
 
 							logger.info("Verified the block signature successfully for entity: " + msg.getSender());
+							logger.info("PREPREPARE MESSAGE RECEIVES FOLLOWING BLOCK:");
+							logger.warn(msg.getBlock());
 
 							PrepareMessage pm = new PrepareMessage(cryptoName, msg.getSender(), msg.getBlock(),
 									msg.getBlockSignature(), msg.getViewNumber(), msg.getSeqNumber());
@@ -291,7 +313,7 @@ public class PBFTProtocol extends GenericProtocol {
 							// Commit messages are not being sent because BlockSignature is somehow always different
 							logger.warn("BOOOOOOOOOOOOOOOLEAN");
 							logger.warn(prepareMap.containsKey(mapKey));
-							logger.warn(mapKey);
+							logger.warn(msg.getBlock());
 							logger.warn(msg.getBlockSender());
 							logger.warn(msg.getSender());
 							if(prepareMap.containsKey(mapKey)) {
