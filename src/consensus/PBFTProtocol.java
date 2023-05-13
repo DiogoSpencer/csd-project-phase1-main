@@ -75,6 +75,9 @@ public class PBFTProtocol extends GenericProtocol {
 	private Map<byte[], Integer> prepareMap = new HashMap<>();
 	private Map.Entry<byte[], Integer> popularPrepare;
 
+	private Map<byte[], Integer> commitMap = new HashMap<>();
+	private Map.Entry<byte[], Integer> popularCommit;
+
 	private int seq;
 
 	public PBFTProtocol(Properties props) throws NumberFormatException, UnknownHostException {
@@ -83,6 +86,8 @@ public class PBFTProtocol extends GenericProtocol {
 		this.seq = 0;
 		this.prepareMap = new HashMap<>();
 		this.popularPrepare = new HashMap.SimpleEntry<>(new byte[0], 0);
+		this.commitMap = new HashMap<>();
+		this.popularCommit = new HashMap.SimpleEntry<>(new byte[0], 0);
 
 
 		self = new Host(InetAddress.getByName(props.getProperty(ADDRESS_KEY)),
@@ -336,7 +341,7 @@ public class PBFTProtocol extends GenericProtocol {
 							int currPrepares = prepareMap.get(mapKey);
 
 
-							if(currPrepares >= necessaryPrepares) {
+							if(currPrepares >= necessaryPrepares) { //if replica has received 2f+1 mathcing prepares 
 								CommitMessage cm = new CommitMessage(cryptoName, msg.getSender(), msg.getBlock(), msg.getBlockSignature(), msg.getViewNumber(), msg.getSeqNumber());
 								cm.signMessage(key);
 
@@ -379,9 +384,96 @@ public class PBFTProtocol extends GenericProtocol {
 
 
 	private void handleCommitMsg(CommitMessage msg, Host from, short sourceProto, int channel) {
-		logger.info("Received a CommitMessage from " + msg.getSender() + "<" + from + "> containing "
-				+ "a block signed by " + msg.getBlockSender() + " with view number " + msg.getViewNumber()
-				+ " and sequence number " + msg.getSeqNumber());
+
+			logger.info("Received a CommitMessage from " + msg.getSender() + "<" + from + "> containing "
+					+ "a block signed by " + msg.getBlockSender() + " with view number " + msg.getViewNumber()
+					+ " and sequence number " + msg.getSeqNumber());
+
+
+
+
+			int seqN = msg.getSeqNumber();
+			int viewN = msg.getViewNumber();
+
+
+
+			try {
+				PublicKey senderPublicKey = truststore.getCertificate(msg.getSender()).getPublicKey();
+				PublicKey blockSenderPublicKey = truststore.getCertificate(msg.getBlockSender()).getPublicKey();
+
+				if (this.viewNumber == viewN) {
+					if (this.seq == seqN) {
+						if(msg.checkSignature(senderPublicKey)) {
+
+							logger.info("Verified the message signature successfully for entity: " + msg.getSender());
+					
+					if(SignaturesHelper.checkSignature(msg.getBlock(), msg.getBlockSignature(), blockSenderPublicKey )) {
+
+
+						byte[] mapKey = msg.getBlockSignature();
+
+
+						if(commitMap.containsKey(mapKey)) {
+							int currValue = commitMap.get(mapKey);
+							commitMap.put(mapKey, ++currValue);
+
+							if(popularCommit.getValue() < currValue) {
+								popularCommit = new HashMap.SimpleEntry<>(mapKey, currValue);
+							}
+						} else {
+							commitMap.put(mapKey, 1);
+							if(popularCommit.getValue() == 0) {
+								popularCommit = new HashMap.SimpleEntry<>(mapKey, 1);
+							}
+						}
+
+						//logger.info("Verified the block signature successfully for entity: " + msg.getSender());
+
+						int necessaryCommits = 2*(view.size()/3) + 1;
+							int currCommits = commitMap.get(mapKey);
+
+
+							if(currCommits >= necessaryCommits) { //if replica has received 2f+1 mathcing commits 
+
+								//send reply to the client(blockchain protocol) that the operation has been executed
+						        triggerNotification(new CommittedNotification(msg.getBlock(), msg.getBlockSignature()));
+
+								//adicionar reset de maps e seq number e assim aqui acho eu
+
+								logger.info("Sent a commit notification from node " + cryptoName + "to the client with commitCounter: <" + currCommits + ">");
+							} 
+
+                        
+						 
+
+						
+
+
+					}else {
+								logger.warn("Received CommitMessage from " + msg.getSender() + "<" + from
+										+ "> with invalid block signature");
+								}
+
+							}else {
+								logger.warn("Reveived CommitMessage from " + msg.getSender() + "<" + from
+										+ "> with invalid message signature.");
+							}
+		
+						}else {
+							logger.warn("Received CommitMessage from " + msg.getSender() + "<" + from
+									+ "> with invalid Sequence Number");
+							logger.warn(String.format("Current sequence number: %d, Received Sequence Number: %d", this.seq, seqN));
+						}
+					}else {
+						logger.warn("Received CommitMessage from " + msg.getSender() + "<" + from
+								+ "> with invalid View Number");
+					}
+				}catch (InvalidKeyException | NoSuchAlgorithmException | SignatureException | InvalidFormatException
+				| NoSignaturePresentException |KeyStoreException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		} 	
+
 
 
 		
