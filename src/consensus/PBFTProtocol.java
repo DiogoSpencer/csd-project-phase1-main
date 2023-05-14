@@ -88,6 +88,7 @@ public class PBFTProtocol extends GenericProtocol {
 		this.popularPrepare = new HashMap.SimpleEntry<>(new byte[0], 0);
 		this.commitMap = new HashMap<>();
 		this.popularCommit = new HashMap.SimpleEntry<>(new byte[0], 0);
+		
 
 
 		self = new Host(InetAddress.getByName(props.getProperty(ADDRESS_KEY)),
@@ -147,6 +148,7 @@ public class PBFTProtocol extends GenericProtocol {
 		registerChannelEventHandler(peerChannel, OutConnectionFailed.EVENT_ID, this::uponOutConnectionFailed);
 
 		logger.info("Standing by to establish connections (10s)");
+		
 
 		try {
 			Thread.sleep(10 * 1000);
@@ -175,10 +177,7 @@ public class PBFTProtocol extends GenericProtocol {
 	// TODO: Add event (messages, requests, timers, notifications) handlers of the
 	// protocol
 
-	private void uponPropose(ProposeRequest msg, Host from) {
-		// sendMessage(msg, channel);
-
-	}
+	
 
 	private void handleProposeRequest(ProposeRequest request, short from) {
 		int nodeId = Integer.parseInt(cryptoName.replace("node", ""));
