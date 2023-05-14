@@ -1,21 +1,22 @@
 package consensus.notifications;
 
+import blockchain.Block;
 import pt.unl.fct.di.novasys.babel.generic.ProtoNotification;
 
 public class CommittedNotification extends ProtoNotification {
 
 	public final static short NOTIFICATION_ID = 101;
 	
-	private final byte[] block;
+	private final Block block;
 	private final byte[] signature;
 	
-	public CommittedNotification(byte[] block, byte[] signature) {
+	public CommittedNotification(Block block, byte[] signature) {
 		super(CommittedNotification.NOTIFICATION_ID);
 		this.block = block;
 		this.signature = signature;
 	}
 
-	public byte[] getBlock() {
+	public Block getBlock() {
 		return block;
 	}
 

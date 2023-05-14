@@ -34,6 +34,10 @@ public class ClientRequest extends ProtoRequest {
 	public byte[] getOperation() {
 		return operation;
 	}
+
+	public long getTimeStamp() {
+        return requestId.timestamp();
+    }
 	
 	static ClientRequest fromBytes(byte[] b) {
 		ByteBuf bb = Unpooled.wrappedBuffer(b);

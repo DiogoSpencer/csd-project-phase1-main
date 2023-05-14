@@ -23,6 +23,7 @@ import java.util.Set;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import blockchain.messages.RedirectClientRequestMessage;
 import blockchain.requests.ClientRequest;
 import blockchain.timers.CheckUnhandledRequestsPeriodicTimer;
 import blockchain.timers.LeaderSuspectTimer;
@@ -33,6 +34,8 @@ import consensus.requests.ProposeRequest;
 import pt.unl.fct.di.novasys.babel.core.GenericProtocol;
 import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
 import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
+import pt.unl.fct.di.novasys.channel.tcp.MultithreadedTCPChannel;
+import pt.unl.fct.di.novasys.channel.tcp.TCPChannel;
 import pt.unl.fct.di.novasys.network.data.Host;
 import utils.Crypto;
 import utils.SignaturesHelper;
@@ -66,6 +69,7 @@ public class BlockChainProtocol extends GenericProtocol {
 	private final List<Host> view;
 	private boolean leader;
 	private List<Block> blockchainList;
+	private List<byte[]> unhandledRequests;
 
 	public BlockChainProtocol(Properties props) throws NumberFormatException, UnknownHostException {
 		super(BlockChainProtocol.PROTO_NAME, BlockChainProtocol.PROTO_ID);
@@ -80,6 +84,7 @@ public class BlockChainProtocol extends GenericProtocol {
 		view = new LinkedList<>();
 		this.commitNotificationMap = new HashMap<>();
 		this.popularcommitNotification = new HashMap.SimpleEntry<>(new byte[0], 0);
+		unhandledRequests = new ArrayList<byte[]>();
 
 		//generate blockhain
 		blockchainList = new ArrayList<Block>();
@@ -114,6 +119,13 @@ public class BlockChainProtocol extends GenericProtocol {
 			e.printStackTrace();
 		}
 
+
+
+		Properties peerProps = new Properties();
+		peerProps.put(MultithreadedTCPChannel.ADDRESS_KEY, props.getProperty(ADDRESS_KEY));
+		peerProps.setProperty(TCPChannel.PORT_KEY, props.getProperty(PORT_KEY));
+		int peerChannel = createChannel(TCPChannel.NAME, peerProps);
+
         
 
 
@@ -124,6 +136,9 @@ public class BlockChainProtocol extends GenericProtocol {
 
 
 		registerRequestHandler(ClientRequest.REQUEST_ID, this::handleClientRequest);
+
+		registerMessageHandler(peerChannel, RedirectClientRequestMessage.MESSAGE_ID, this::handleRedirectClientRequestMessage);
+		registerMessageSerializer(peerChannel, RedirectClientRequestMessage.MESSAGE_ID, RedirectClientRequestMessage.serializer);
 
 		registerTimerHandler(CheckUnhandledRequestsPeriodicTimer.TIMER_ID,
 				this::handleCheckUnhandledRequestsPeriodicTimer);
@@ -149,7 +164,7 @@ public class BlockChainProtocol extends GenericProtocol {
 	 */
 
 	public void handleClientRequest(ClientRequest req, short protoID) {
-		logger.info("Received a ClientRequeest with id: " + req.getRequestId());
+		logger.info("Received a ClientRequest with id: " + req.getRequestId());
 
 		if (this.leader) {
 
@@ -158,9 +173,31 @@ public class BlockChainProtocol extends GenericProtocol {
 				// Only one block should be submitted for agreement at a time
 				// Also this assumes that a block only contains a single client request
 				byte[] request = req.generateByteRepresentation();
-				byte[] signature = SignaturesHelper.generateSignature(request, this.key);
+				//byte[] signature = SignaturesHelper.generateSignature(request, this.key);
 
-				sendRequest(new ProposeRequest(request, signature), PBFTProtocol.PROTO_ID);
+				
+
+                int lastBlockPosition = blockchainList.size()-1;
+				Block lastBlock = blockchainList.get(lastBlockPosition);
+
+				byte[] hashOfPrevious = calculateHash(lastBlock);
+				List<byte[]> operationsProposed = new ArrayList<byte[]>();
+				operationsProposed.add(request);
+
+
+
+				Block blockToPurpose = new Block(hashOfPrevious, lastBlock.getSequenceNumber()+1, operationsProposed, cryptoName);
+
+				byte[] signature = SignaturesHelper.generateSignature(blockToPurpose, this.key);
+
+				
+				
+
+				sendRequest(new ProposeRequest(blockToPurpose, signature), PBFTProtocol.PROTO_ID);
+
+				//log the request in the unhandle request log
+				unhandledRequests.add(request);
+
 			} catch (Exception e) {
 				e.printStackTrace();
 				System.exit(1); // Catastrophic failure!!!
@@ -179,34 +216,13 @@ public class BlockChainProtocol extends GenericProtocol {
 
 			Host leaderHost = view.get(currentPrimary-1); //getting the leader
 
+			sendMessage(new RedirectClientRequestMessage(req.getOperation()), leaderHost);
+
+		}
+
 
 			    
-			try {
-				byte[] request = req.generateByteRepresentation();
-				byte[] signature = SignaturesHelper.generateSignature(request, this.key);
-
-                
-                //mandar msg com a request para a replica primaria
-				
-                
-
-
-				
-
-			} catch (InvalidKeyException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			} catch (NoSuchAlgorithmException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			} catch (SignatureException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			}
-
-            
 			
-		}
 	}
 
 	/*
@@ -256,11 +272,11 @@ public class BlockChainProtocol extends GenericProtocol {
 	public void handleCommittedNotification(CommittedNotification cn, short from) {
 		// TODO: write this handler
 
-		if (this.leader) {
+		
 
 			// Verify if the signature of the block is valid
 			try {
-				if (SignaturesHelper.checkSignature(cn.getBlock(), cn.getSignature(),
+				if (SignaturesHelper.checkSignature(cn.getBlock().getOperations().get(0), cn.getSignature(),
 						truststore.getCertificate(cryptoName).getPublicKey())) {
 
 					byte[] mapKey = cn.getSignature();
@@ -285,24 +301,19 @@ public class BlockChainProtocol extends GenericProtocol {
 					logger.info("Reply of block decision received: " + cn.getBlock() + " counter: "
 							+ currCommitNotifications);
 
-					if (currCommitNotifications >= necessaryCommitNotifications) { // if replica has received f+1
-																					// mathcing commit notifications
-						byte[] decidedblock = cn.getBlock();
+					if (currCommitNotifications >= necessaryCommitNotifications) { // if replica has received f+1 mathcing commit notifications
+																					
 
-                        int lastBlockPosition = blockchainList.size()-1;
-						Block lastBlock = blockchainList.get(lastBlockPosition);
 
-					    byte[] hashOfPrevious = calculateHash(lastBlock);
-
-						List<byte[]> operationsCommited = new ArrayList<byte[]>();
-						operationsCommited.add(decidedblock);
+                        //TODO Remove the request from unhadled requests
+						Block blockToAdd = cn.getBlock();
                         
                         
+						unhandledRequests.remove(blockToAdd.getOperations().get(0));
 
-
-						Block blockToAdd = new Block(hashOfPrevious, lastBlock.getSequenceNumber()+1 , operationsCommited, cryptoName , cn.getSignature());
 						// add block to the blockchain
 						blockchainList.add(blockToAdd);
+						logger.info("Block added with sequence number: " + blockToAdd.getSequenceNumber());
 					}
 
 				} else {
@@ -322,9 +333,7 @@ public class BlockChainProtocol extends GenericProtocol {
 				e.printStackTrace();
 			}
 
-		} else {
-			// TODO: Redirect this request to the leader via a specialized message
-		}
+		
 	}
 
 	/*
@@ -341,6 +350,13 @@ public class BlockChainProtocol extends GenericProtocol {
 	 */
 
 	// TODO: add message handlers (and register them)
+
+
+	public void handleRedirectClientRequestMessage(RedirectClientRequestMessage msg, Host from, short sourceProto, int channel){
+
+		sendRequest(new ClientRequest(msg.getOperation()), BlockChainProtocol.PROTO_ID);
+         
+	}
 
 	/*
 	 * ----------------------------------------------- -------------
@@ -363,10 +379,12 @@ public class BlockChainProtocol extends GenericProtocol {
 		// Iterate through the unhandled requests and check their status
 		for (ClientRequest request : unhandledRequests) {
 			// Check if the request has exceeded the timeout period
-			if (System.currentTimeMillis() - request.getTimestamp() >= leaderTimeout) {
+			if (System.currentTimeMillis() - request.getTimeStamp() >= checkRequestsPeriod) {
 				logger.warn("Request " + request.getRequestId() + " has timed out.");
 
 				// Send messages to all the replicas (start suspect)
+                
+			
 
 				break; // No need to continue checking other requests
 			}

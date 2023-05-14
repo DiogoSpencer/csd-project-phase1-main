@@ -23,6 +23,18 @@ public class Block {
         this.signature = signature;
     }
 
+    public Block(byte[] previousBlockHash, int sequenceNumber, List<byte[]> operations,
+    String replicaIdentity) {
+        this.previousBlockHash = previousBlockHash;
+        this.sequenceNumber = sequenceNumber;
+        this.operations = operations;
+        this.replicaIdentity = replicaIdentity;
+        this.signature = null;
+}
+
+
+
+
     public byte[] getPreviousBlockHash() {
         return previousBlockHash;
     }
