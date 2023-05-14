@@ -11,11 +11,13 @@ import java.security.PrivateKey;
 import java.security.SignatureException;
 import java.security.UnrecoverableKeyException;
 import java.security.cert.CertificateException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -29,6 +31,7 @@ import consensus.notifications.ViewChange;
 import consensus.requests.ProposeRequest;
 import pt.unl.fct.di.novasys.babel.core.GenericProtocol;
 import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
+import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
 import pt.unl.fct.di.novasys.network.data.Host;
 import utils.Crypto;
 import utils.SignaturesHelper;
@@ -61,6 +64,7 @@ public class BlockChainProtocol extends GenericProtocol {
 	private int viewNumber;
 	private final List<Host> view;
 	private boolean leader;
+	private List<Block> blockchain;
 
 	public BlockChainProtocol(Properties props) throws NumberFormatException, UnknownHostException {
 		super(BlockChainProtocol.PROTO_NAME, BlockChainProtocol.PROTO_ID);
@@ -75,6 +79,22 @@ public class BlockChainProtocol extends GenericProtocol {
 		view = new LinkedList<>();
 		this.commitNotificationMap = new HashMap<>();
 		this.popularcommitNotification = new HashMap.SimpleEntry<>(new byte[0], 0);
+
+		//generate blockhain
+		blockchain = new ArrayList<Block>();
+
+		//creation of genesis block(this can be read from a file as a parameter of the protocol in the future)
+		List<byte[]> operations = new ArrayList<>();
+		operations.add(new byte[] { 0x01, 0x02, 0x03}); //Genesis block has this hard coded operation
+		byte[] previousBlockHash = new byte[] { 0x12, 0x34, 0x56, 0x78 }; // Genesis block hard coded previousHash
+        int blockNumber = 0; // Genesis block has block number 0
+        String replicaIdentity = "Genesis"; 
+        byte[] signature = new byte[] { 0x12, 0x34, 0x56 }; // Genesis block hard coded signature
+
+	    Block genesisBlock = new Block(previousBlockHash, blockNumber , operations, replicaIdentity , signature);
+
+		blockchain.add(genesisBlock); //adding the genesis block as the first element of the blockchain
+
 
 		// Read timers and timeouts configurations
 		checkRequestsPeriod = Long.parseLong(props.getProperty(PERIOD_CHECK_REQUESTS));
@@ -92,6 +112,15 @@ public class BlockChainProtocol extends GenericProtocol {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
+
+        
+
+
+		
+
+
+
+
 
 		registerRequestHandler(ClientRequest.REQUEST_ID, this::handleClientRequest);
 
@@ -137,6 +166,45 @@ public class BlockChainProtocol extends GenericProtocol {
 			}
 		} else {
 			// TODO: Redirect this request to the leader via a specialized message
+
+			int remainderofView = viewNumber % view.size();
+			int currentPrimary;
+
+			if (remainderofView == 0) {
+				currentPrimary = view.size();
+			} else {
+				currentPrimary = remainderofView;
+			}	
+
+			Host leaderHost = view.get(currentPrimary-1); //getting the leader
+
+
+			    
+			try {
+				byte[] request = req.generateByteRepresentation();
+				byte[] signature = SignaturesHelper.generateSignature(request, this.key);
+
+                
+                //mandar msg com a request para a replica primaria
+				
+                
+
+
+				
+
+			} catch (InvalidKeyException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			} catch (NoSuchAlgorithmException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			} catch (SignatureException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+
+            
+			
 		}
 	}
 
@@ -154,6 +222,7 @@ public class BlockChainProtocol extends GenericProtocol {
 	 */
 
 	public void handleViewChangeNotification(ViewChange vc, short from) {
+
 		logger.info("New view received (" + vc.getViewNumber() + ")");
 
 		// TODO: Should maybe validate this ViewChange :)
@@ -165,76 +234,78 @@ public class BlockChainProtocol extends GenericProtocol {
 		}
 		// TODO: Compute correctly who is the leader and not assume that you are always
 		// the leader.
-		this.leader = true;
+		int nodeId = Integer.parseInt(cryptoName.replace("node", ""));
+		int remainderofView = viewNumber % view.size();
+		int currentPrimary;
+
+		if (remainderofView == 0) {
+			currentPrimary = view.size();
+		} else {
+			currentPrimary = remainderofView;
+		}
+
+		if (nodeId == currentPrimary) {
+			this.leader = true;
+		} else {
+			this.leader = false;
+		}
 
 	}
 
 	public void handleCommittedNotification(CommittedNotification cn, short from) {
 		// TODO: write this handler
 
-
 		if (this.leader) {
 
-		// Verify if the signature of the block is valid
-		try {
-			if (SignaturesHelper.checkSignature(cn.getBlock(), cn.getSignature(),
-			truststore.getCertificate(cryptoName).getPublicKey())) {
+			// Verify if the signature of the block is valid
+			try {
+				if (SignaturesHelper.checkSignature(cn.getBlock(), cn.getSignature(),
+						truststore.getCertificate(cryptoName).getPublicKey())) {
 
+					byte[] mapKey = cn.getSignature();
 
+					if (commitNotificationMap.containsKey(mapKey)) {
+						int currValue = commitNotificationMap.get(mapKey);
+						commitNotificationMap.put(mapKey, ++currValue);
 
-                byte[] mapKey = cn.getSignature();
-				
-
-
-				
-
-				if(commitNotificationMap.containsKey(mapKey)) {
-					int currValue = commitNotificationMap.get(mapKey);
-					commitNotificationMap.put(mapKey, ++currValue);
-
-					if(popularcommitNotification.getValue() < currValue) {
-						popularcommitNotification = new HashMap.SimpleEntry<>(mapKey, currValue);
+						if (popularcommitNotification.getValue() < currValue) {
+							popularcommitNotification = new HashMap.SimpleEntry<>(mapKey, currValue);
+						}
+					} else {
+						commitNotificationMap.put(mapKey, 1);
+						if (popularcommitNotification.getValue() == 0) {
+							popularcommitNotification = new HashMap.SimpleEntry<>(mapKey, 1);
+						}
 					}
+
+					int necessaryCommitNotifications = (view.size() / 3) + 1;
+					int currCommitNotifications = commitNotificationMap.get(mapKey);
+
+					logger.info("Reply of block decision received: " + cn.getBlock() + " counter: "
+							+ currCommitNotifications);
+
+					if (currCommitNotifications >= necessaryCommitNotifications) { // if replica has received f+1
+																					// mathcing commit notifications
+						byte[] decidedblock = cn.getBlock();
+						// add block to the blockchain
+					}
+
 				} else {
-					commitNotificationMap.put(mapKey, 1);
-					if(popularcommitNotification.getValue() == 0) {
-						popularcommitNotification = new HashMap.SimpleEntry<>(mapKey, 1);
-					}
+					logger.warn("Received Commit Notification with invalid block signature.");
 				}
-
-                 
-				int necessaryCommitNotifications = (view.size()/3) + 1;
-				int currCommitNotifications = commitNotificationMap.get(mapKey);
-
-				logger.info("Reply of block decision received: " + cn.getBlock() + " counter: " + currCommitNotifications);
-
-
-				if(currCommitNotifications >= necessaryCommitNotifications) { //if replica has received f+1 mathcing commit notifications 
-					byte[] decidedblock = cn.getBlock();
-					//add block to the blockchain
-
-
-
-			}else{
-				logger.warn("Received Commit Notification with invalid block signature.");
+			} catch (InvalidKeyException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			} catch (SignatureException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			} catch (NoSuchAlgorithmException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			} catch (KeyStoreException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
 			}
-		} catch (InvalidKeyException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (SignatureException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (NoSuchAlgorithmException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (KeyStoreException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		}
-
-
-
-		
 
 		} else {
 			// TODO: Redirect this request to the leader via a specialized message
@@ -271,10 +342,39 @@ public class BlockChainProtocol extends GenericProtocol {
 
 	public void handleCheckUnhandledRequestsPeriodicTimer(CheckUnhandledRequestsPeriodicTimer t, long timerId) {
 		// TODO: write this handler
+
+		logger.info("Checking unhandled requests...");
+
+		// Iterate through the unhandled requests and check their status
+		for (ClientRequest request : unhandledRequests) {
+			// Check if the request has exceeded the timeout period
+			if (System.currentTimeMillis() - request.getTimestamp() >= leaderTimeout) {
+				logger.warn("Request " + request.getRequestId() + " has timed out.");
+
+				// Send messages to all the replicas (start suspect)
+
+				break; // No need to continue checking other requests
+			}
+		}
 	}
 
 	public void handleLeaderSuspectTimer(LeaderSuspectTimer t, long timerId) {
 		// TODO: write this handler
+
+		logger.info("Leader suspect timer triggered.");
+
+		// Check if this replica is the leader
+		if (leader) {
+			logger.warn("Leader suspect timer triggered for the current leader.");
+
+			// TODO: Take appropriate action as the leader (e.g., initiate a view change)
+
+		} else {
+			logger.info("Leader suspect timer triggered for a non-leader replica.");
+
+			// TODO: Take appropriate action as a non-leader replica (e.g., start an
+			// election process)
+		}
 	}
 
 	/*
