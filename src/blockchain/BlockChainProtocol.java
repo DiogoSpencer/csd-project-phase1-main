@@ -6,6 +6,7 @@ import java.net.UnknownHostException;
 import java.security.InvalidKeyException;
 import java.security.KeyStore;
 import java.security.KeyStoreException;
+import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.PrivateKey;
 import java.security.SignatureException;
@@ -64,7 +65,7 @@ public class BlockChainProtocol extends GenericProtocol {
 	private int viewNumber;
 	private final List<Host> view;
 	private boolean leader;
-	private List<Block> blockchain;
+	private List<Block> blockchainList;
 
 	public BlockChainProtocol(Properties props) throws NumberFormatException, UnknownHostException {
 		super(BlockChainProtocol.PROTO_NAME, BlockChainProtocol.PROTO_ID);
@@ -81,7 +82,7 @@ public class BlockChainProtocol extends GenericProtocol {
 		this.popularcommitNotification = new HashMap.SimpleEntry<>(new byte[0], 0);
 
 		//generate blockhain
-		blockchain = new ArrayList<Block>();
+		blockchainList = new ArrayList<Block>();
 
 		//creation of genesis block(this can be read from a file as a parameter of the protocol in the future)
 		List<byte[]> operations = new ArrayList<>();
@@ -93,7 +94,7 @@ public class BlockChainProtocol extends GenericProtocol {
 
 	    Block genesisBlock = new Block(previousBlockHash, blockNumber , operations, replicaIdentity , signature);
 
-		blockchain.add(genesisBlock); //adding the genesis block as the first element of the blockchain
+		blockchainList.add(genesisBlock); //adding the genesis block as the first element of the blockchain
 
 
 		// Read timers and timeouts configurations
@@ -287,7 +288,21 @@ public class BlockChainProtocol extends GenericProtocol {
 					if (currCommitNotifications >= necessaryCommitNotifications) { // if replica has received f+1
 																					// mathcing commit notifications
 						byte[] decidedblock = cn.getBlock();
+
+                        int lastBlockPosition = blockchainList.size()-1;
+						Block lastBlock = blockchainList.get(lastBlockPosition);
+
+					    byte[] hashOfPrevious = calculateHash(lastBlock);
+
+						List<byte[]> operationsCommited = new ArrayList<byte[]>();
+						operationsCommited.add(decidedblock);
+                        
+                        
+
+
+						Block blockToAdd = new Block(hashOfPrevious, lastBlock.getSequenceNumber()+1 , operationsCommited, cryptoName , cn.getSignature());
 						// add block to the blockchain
+						blockchainList.add(blockToAdd);
 					}
 
 				} else {
@@ -392,5 +407,17 @@ public class BlockChainProtocol extends GenericProtocol {
 	public void submitClientOperation(byte[] b) {
 		sendRequest(new ClientRequest(b), BlockChainProtocol.PROTO_ID);
 	}
+
+	public static byte[] calculateHash(Block block) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] blockBytes = block.toByteArray();
+            return digest.digest(blockBytes);
+        } catch (NoSuchAlgorithmException e) {
+            e.printStackTrace();
+        }
+		return null;
+        
+    }
 
 }

@@ -1,5 +1,7 @@
 package blockchain;
 
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 public class Block {
@@ -39,6 +41,37 @@ public class Block {
 
     public byte[] getSignature() {
         return signature;
+    }
+
+    public byte[] toByteArray() {
+        int size = 0;
+        
+        // Calculate the size of the byte array
+        size += previousBlockHash.length;
+        size += Integer.BYTES; // Size of the sequenceNumber (4 bytes)
+        
+        // Calculate the size of all operations combined
+        for (byte[] operation : operations) {
+            size += operation.length;
+        }
+        
+        size += replicaIdentity.getBytes(StandardCharsets.UTF_8).length;
+        size += signature.length;
+        
+        // Create a byte buffer with the calculated size
+        ByteBuffer buffer = ByteBuffer.allocate(size);
+        
+        // Add each field to the byte buffer
+        buffer.put(previousBlockHash);
+        buffer.putInt(sequenceNumber);
+        for (byte[] operation : operations) {
+            buffer.put(operation);
+        }
+        buffer.put(replicaIdentity.getBytes(StandardCharsets.UTF_8));
+        buffer.put(signature);
+        
+        // Convert the byte buffer to a byte array and return it
+        return buffer.array();
     }
 
 
