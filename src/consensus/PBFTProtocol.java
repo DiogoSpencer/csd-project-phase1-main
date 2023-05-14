@@ -13,6 +13,7 @@ import java.security.PublicKey;
 import java.security.SignatureException;
 import java.security.UnrecoverableKeyException;
 import java.security.cert.CertificateException;
+import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -25,6 +26,7 @@ import java.util.Objects;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import blockchain.Block;
 import consensus.messages.CommitMessage;
 import consensus.messages.PrePrepareMessage;
 import consensus.messages.PrepareMessage;
@@ -77,6 +79,7 @@ public class PBFTProtocol extends GenericProtocol {
 
 	private Map<byte[], Integer> commitMap = new HashMap<>();
 	private Map.Entry<byte[], Integer> popularCommit;
+	private List<Block> prepreparedBlocks;
 
 	private int seq;
 
@@ -88,8 +91,7 @@ public class PBFTProtocol extends GenericProtocol {
 		this.popularPrepare = new HashMap.SimpleEntry<>(new byte[0], 0);
 		this.commitMap = new HashMap<>();
 		this.popularCommit = new HashMap.SimpleEntry<>(new byte[0], 0);
-		
-
+		this.prepreparedBlocks = new ArrayList<>();
 
 		self = new Host(InetAddress.getByName(props.getProperty(ADDRESS_KEY)),
 				Integer.parseInt(props.getProperty(PORT_KEY)));
@@ -123,8 +125,6 @@ public class PBFTProtocol extends GenericProtocol {
 		// TODO: Must add handlers for requests and messages and register message
 		// serializers
 
-		// registerMessageHandler(peerChannel, ProposeRequest.REQUEST_ID, null);
-
 		registerMessageHandler(peerChannel, PrePrepareMessage.MESSAGE_ID, this::handlePrePrepareMessage,
 				this::handleMessageFailed);
 		registerMessageSerializer(peerChannel, PrePrepareMessage.MESSAGE_ID, PrePrepareMessage.serializer);
@@ -148,7 +148,6 @@ public class PBFTProtocol extends GenericProtocol {
 		registerChannelEventHandler(peerChannel, OutConnectionFailed.EVENT_ID, this::uponOutConnectionFailed);
 
 		logger.info("Standing by to establish connections (10s)");
-		
 
 		try {
 			Thread.sleep(10 * 1000);
@@ -177,59 +176,59 @@ public class PBFTProtocol extends GenericProtocol {
 	// TODO: Add event (messages, requests, timers, notifications) handlers of the
 	// protocol
 
-	
-
 	private void handleProposeRequest(ProposeRequest request, short from) {
-		int nodeId = Integer.parseInt(cryptoName.replace("node", ""));
-		if (viewNumber == nodeId) {
-			logger.info(String.format("Received a propose request with a block, on %s", cryptoName));
-			try {
-				// Verify if the signature of the block is valid
-				if (SignaturesHelper.checkSignature(request.getBlock(), request.getSignature(),
-						truststore.getCertificate(cryptoName).getPublicKey())) {
-					PrePrepareMessage ppm = new PrePrepareMessage(cryptoName, request.getBlock(),
-							request.getSignature(), viewNumber, ++seq);
-					ppm.signMessage(key);
 
-					logger.info("Block signature verified for local entity (" + this.cryptoName + ")");
-					logger.info("PROPOSE REQUEST RECEIVES FOLLOWING BLOCK:");
-					logger.warn(request.getBlock());
-					
-					// MessageDigest digest = MessageDigest.getInstance("SHA-256");
-					// digest.digest(((byte[]) request));
-					// byte[] proposeHash = Objects.hash(ppm);
-					// ByteBuf out = new ByteBuf();
-					// ByteBuf buf = ByteBuf.buffer(128);
-					int ppmCount = 0;
-					for (Host h : this.view) {
-						if (!h.equals(self)) {
+		logger.info(String.format("Received a propose request with a block, on %s", cryptoName));
+		try {
+			// Verify if the signature of the block is valid
+			if (SignaturesHelper.checkSignature(request.getBlock().toByteArray(), request.getSignature(),
+					truststore.getCertificate(request.getBlock().getReplicaIdentity()).getPublicKey())) {
 
-							logger.info("HANDLE PROPOSE REQUEST SENDS FOLLOWING BLOCK:");
-							logger.info(ppm.getBlock());
-							logger.info(String.format("PPMMMM SENT %d TIMES", ppmCount++));
-							// logger.info(ppm.getSerializer().serializeBody(((SignedProtoMessage) ppm), buf));
+				PrePrepareMessage ppm = new PrePrepareMessage(cryptoName, request.getBlock(),
+						request.getSignature(), viewNumber, ++seq);
+				ppm.signMessage(key);
 
-							// ppm.getSerializer().serializeBody(ppm, out);
-							sendMessage(ppm, h);
+				//logger.info("Block signature verified for local entity (" + this.cryptoName + ")");
+				//logger.info("PROPOSE REQUEST RECEIVES FOLLOWING BLOCK:");
+				//logger.warn(request.getBlock());
+				//logger.warn(request.getBlock());
 
-						}
+				// MessageDigest digest = MessageDigest.getInstance("SHA-256");
+				// digest.digest(((byte[]) request));
+				// byte[] proposeHash = Objects.hash(ppm);
+				// ByteBuf out = new ByteBuf();
+				// ByteBuf buf = ByteBuf.buffer(128);
+				int ppmCount = 0;
+				for (Host h : this.view) {
+					if (!h.equals(self)) {
+
+						//logger.info("HANDLE PROPOSE REQUEST SENDS FOLLOWING BLOCK:");
+						//logger.warn(ppm.getBlock());
+						//logger.info(String.format("PPMMMM SENT %d TIMES", ppmCount++));
+						// logger.info(ppm.getSerializer().serializeBody(((SignedProtoMessage) ppm),
+						// buf));
+
+						// ppm.getSerializer().serializeBody(ppm, out);
+						sendMessage(ppm, h);
+
 					}
-
-					// TODO is this signature generation necessary?
-					// //Hashing the block
-					// MessageDigest digest = MessageDigest.getInstance("SHA-256");
-					// byte[] blockHash = digest.digest(request.getBlock());
-					// byte[] signature = SignaturesHelper.generateSignature(blockHash, this.key);
-
-					// sendMessage(new PrePrepareMessage(blockHash, signature, seq, viewNumber),
-					// self);
-				} else {
-					logger.warn("Received ProposeRequest with invalid block signature.");
 				}
-			} catch (InvalidKeyException | SignatureException | NoSuchAlgorithmException | KeyStoreException
-					| InvalidSerializerException e) {
-				e.printStackTrace();
+
+				// TODO is this signature generation necessary?
+				// //Hashing the block
+				// MessageDigest digest = MessageDigest.getInstance("SHA-256");
+				// byte[] blockHash = digest.digest(request.getBlock());
+				// byte[] signature = SignaturesHelper.generateSignature(blockHash, this.key);
+
+				// sendMessage(new PrePrepareMessage(blockHash, signature, seq, viewNumber),
+				// self);
+			} else {
+				logger.warn("Received ProposeRequest with invalid block signature.");
+				//suspect leader
 			}
+		} catch (InvalidKeyException | SignatureException | NoSuchAlgorithmException | KeyStoreException
+				| InvalidSerializerException e) {
+			e.printStackTrace();
 		}
 
 	}
@@ -249,13 +248,21 @@ public class PBFTProtocol extends GenericProtocol {
 
 						logger.info("Verified the message signature successfully for entity: " + msg.getSender());
 
-						if (SignaturesHelper.checkSignature(msg.getBlock(), msg.getBlockSignature(), senderPublicKey)) {
+						if (SignaturesHelper.checkSignature(msg.getBlock().toByteArray(), msg.getBlockSignature(),
+								senderPublicKey)) {
 
 							logger.info("Verified the block signature successfully for entity: " + msg.getSender());
-							logger.info("PREPREPARE MESSAGE RECEIVES FOLLOWING BLOCK:");
-							logger.warn(msg.getBlock());
+							//logger.info("PREPREPARE MESSAGE RECEIVES FOLLOWING BLOCK:");
+							//logger.warn(msg.getBlock());
 
-							PrepareMessage pm = new PrepareMessage(cryptoName, msg.getSender(), msg.getBlock(),
+							// hash block
+							byte[] hashOfBlock = calculateHash(msg.getBlock());
+
+							
+
+							prepreparedBlocks.add(msg.getBlock()); //log block as preprepared
+
+							PrepareMessage pm = new PrepareMessage(cryptoName, msg.getSender(), hashOfBlock,
 									msg.getBlockSignature(), msg.getViewNumber(), msg.getSeqNumber());
 							pm.signMessage(key);
 
@@ -292,70 +299,63 @@ public class PBFTProtocol extends GenericProtocol {
 		int seqN = msg.getSeqNumber();
 		int viewN = msg.getViewNumber();
 
-
-
 		logger.info("Received a PrepareMessage from " + msg.getSender() + "<" + from + "> containing "
 				+ "a block signed by " + msg.getBlockSender() + " with view number " + msg.getViewNumber()
 				+ " and sequence number " + msg.getSeqNumber());
 
+		try {
+			PublicKey senderPublicKey = truststore.getCertificate(msg.getSender()).getPublicKey();
+			PublicKey blockSenderPublicKey = truststore.getCertificate(msg.getBlockSender()).getPublicKey();
 
+			if (this.viewNumber == viewN) {
+				if (this.seq == seqN) {
+					if (msg.checkSignature(senderPublicKey)) {
 
-				try {
-					PublicKey senderPublicKey = truststore.getCertificate(msg.getSender()).getPublicKey();
-					PublicKey blockSenderPublicKey = truststore.getCertificate(msg.getBlockSender()).getPublicKey();
-		
-					if (this.viewNumber == viewN) {
-						if (this.seq == seqN) {
-							if(msg.checkSignature(senderPublicKey)) {
+						logger.info("Verified the message signature successfully for entity: " + msg.getSender());
 
-								logger.info("Verified the message signature successfully for entity: " + msg.getSender());
-						
-						if(SignaturesHelper.checkSignature(msg.getBlock(), msg.getBlockSignature(), blockSenderPublicKey )) {
+						byte[] mapKey = msg.getBlockSignature();
+						// TODO remove these logs after fixing issue
+						// Commit messages are not being sent because BlockSignature is somehow always
+						// different
+						//logger.warn("BOOOOOOOOOOOOOOOLEAN");
+						//logger.warn(prepareMap.containsKey(mapKey));
+						//logger.warn(msg.getBlock());
+						//logger.warn(msg.getBlockSender());
+						//logger.warn(msg.getSender());
+						if (prepareMap.containsKey(mapKey)) {
+							int currValue = prepareMap.get(mapKey);
+							prepareMap.put(mapKey, ++currValue);
 
-							byte[] mapKey = msg.getBlockSignature();
-							// TODO remove these logs after fixing issue
-							// Commit messages are not being sent because BlockSignature is somehow always different
-							logger.warn("BOOOOOOOOOOOOOOOLEAN");
-							logger.warn(prepareMap.containsKey(mapKey));
-							logger.warn(msg.getBlock());
-							logger.warn(msg.getBlockSender());
-							logger.warn(msg.getSender());
-							if(prepareMap.containsKey(mapKey)) {
-								int currValue = prepareMap.get(mapKey);
-								prepareMap.put(mapKey, ++currValue);
+							if (popularPrepare.getValue() < currValue) {
+								popularPrepare = new HashMap.SimpleEntry<>(mapKey, currValue);
+							}
+						} else {
+							prepareMap.put(mapKey, 1);
+							if (popularPrepare.getValue() == 0) {
+								popularPrepare = new HashMap.SimpleEntry<>(mapKey, 1);
+							}
+						}
 
-								if(popularPrepare.getValue() < currValue) {
-									popularPrepare = new HashMap.SimpleEntry<>(mapKey, currValue);
-								}
-							} else {
-								prepareMap.put(mapKey, 1);
-								if(popularPrepare.getValue() == 0) {
-									popularPrepare = new HashMap.SimpleEntry<>(mapKey, 1);
+						logger.info("Verified the block signature successfully for entity: " + msg.getSender());
+
+						int necessaryPrepares = 2 * (view.size() / 3) + 1;
+						int currPrepares = prepareMap.get(mapKey);
+
+						if (currPrepares >= necessaryPrepares) { // if replica has received 2f+1 mathcing prepares
+							CommitMessage cm = new CommitMessage(cryptoName, msg.getSender(), msg.getBlock(),
+									msg.getBlockSignature(), msg.getViewNumber(), msg.getSeqNumber());
+							cm.signMessage(key);
+
+							for (Host h : this.view) {
+								if (!h.equals(self)) {
+									sendMessage(cm, h);
 								}
 							}
 
-							logger.info("Verified the block signature successfully for entity: " + msg.getSender());
-							
-							int necessaryPrepares = 2*(view.size()/3) + 1;
-							int currPrepares = prepareMap.get(mapKey);
-
-
-							if(currPrepares >= necessaryPrepares) { //if replica has received 2f+1 mathcing prepares 
-								CommitMessage cm = new CommitMessage(cryptoName, msg.getSender(), msg.getBlock(), msg.getBlockSignature(), msg.getViewNumber(), msg.getSeqNumber());
-								cm.signMessage(key);
-
-								for(Host h: this.view) {
-									if(!h.equals(self)) {
-										sendMessage(cm, h);
-									}
-								}
-
-								logger.info("Sent a commit message from node " + cryptoName + " prepareCounter: <" + currPrepares + ">");
-							} 
-						} else {
-							logger.warn("Received PrepareMessage from " + msg.getSender() + "<" + from
-									+ "> with invalid block signature");
+							logger.info("Sent a commit message from node " + cryptoName + " prepareCounter: <"
+									+ currPrepares + ">");
 						}
+
 					} else {
 						logger.warn("Reveived PrepareMessage from " + msg.getSender() + "<" + from
 								+ "> with invalid message signature.");
@@ -363,121 +363,105 @@ public class PBFTProtocol extends GenericProtocol {
 				} else {
 					logger.warn("Received PrepareMessage from " + msg.getSender() + "<" + from
 							+ "> with invalid Sequence Number");
-					logger.warn(String.format("Current sequence number: %d, Received Sequence Number: %d", this.seq, seqN));
+					logger.warn(
+							String.format("Current sequence number: %d, Received Sequence Number: %d", this.seq, seqN));
 				}
 			} else {
 				logger.warn("Received PrepareMessage from " + msg.getSender() + "<" + from
 						+ "> with invalid View Number");
 			}
-				}catch (InvalidKeyException | NoSuchAlgorithmException | SignatureException | InvalidFormatException
-								| NoSignaturePresentException | InvalidSerializerException | KeyStoreException e) {
-							// TODO Auto-generated catch block
-							e.printStackTrace();
-						} 	
-
-
-
+		} catch (InvalidKeyException | NoSuchAlgorithmException | SignatureException | InvalidFormatException
+				| NoSignaturePresentException | InvalidSerializerException | KeyStoreException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
 
 	}
 
-
-
 	private void handleCommitMsg(CommitMessage msg, Host from, short sourceProto, int channel) {
 
-			logger.info("Received a CommitMessage from " + msg.getSender() + "<" + from + "> containing "
-					+ "a block signed by " + msg.getBlockSender() + " with view number " + msg.getViewNumber()
-					+ " and sequence number " + msg.getSeqNumber());
+		logger.info("Received a CommitMessage from " + msg.getSender() + "<" + from + "> containing "
+				+ "a block signed by " + msg.getBlockSender() + " with view number " + msg.getViewNumber()
+				+ " and sequence number " + msg.getSeqNumber());
 
+		int seqN = msg.getSeqNumber();
+		int viewN = msg.getViewNumber();
 
+		try {
+			PublicKey senderPublicKey = truststore.getCertificate(msg.getSender()).getPublicKey();
+			PublicKey blockSenderPublicKey = truststore.getCertificate(msg.getBlockSender()).getPublicKey();
 
+			if (this.viewNumber == viewN) {
+				if (this.seq == seqN) {
+					if (msg.checkSignature(senderPublicKey)) {
 
-			int seqN = msg.getSeqNumber();
-			int viewN = msg.getViewNumber();
-
-
-
-			try {
-				PublicKey senderPublicKey = truststore.getCertificate(msg.getSender()).getPublicKey();
-				PublicKey blockSenderPublicKey = truststore.getCertificate(msg.getBlockSender()).getPublicKey();
-
-				if (this.viewNumber == viewN) {
-					if (this.seq == seqN) {
-						if(msg.checkSignature(senderPublicKey)) {
-
-							logger.info("Verified the message signature successfully for entity: " + msg.getSender());
-					
-					if(SignaturesHelper.checkSignature(msg.getBlock(), msg.getBlockSignature(), blockSenderPublicKey )) {
-
+						logger.info("Verified the message signature successfully for entity: " + msg.getSender());
 
 						byte[] mapKey = msg.getBlockSignature();
 
-
-						if(commitMap.containsKey(mapKey)) {
+						if (commitMap.containsKey(mapKey)) {
 							int currValue = commitMap.get(mapKey);
 							commitMap.put(mapKey, ++currValue);
 
-							if(popularCommit.getValue() < currValue) {
+							if (popularCommit.getValue() < currValue) {
 								popularCommit = new HashMap.SimpleEntry<>(mapKey, currValue);
 							}
 						} else {
 							commitMap.put(mapKey, 1);
-							if(popularCommit.getValue() == 0) {
+							if (popularCommit.getValue() == 0) {
 								popularCommit = new HashMap.SimpleEntry<>(mapKey, 1);
 							}
 						}
 
-						//logger.info("Verified the block signature successfully for entity: " + msg.getSender());
+						// logger.info("Verified the block signature successfully for entity: " +
+						// msg.getSender());
 
-						int necessaryCommits = 2*(view.size()/3) + 1;
-							int currCommits = commitMap.get(mapKey);
+						int necessaryCommits = 2 * (view.size() / 3) + 1;
+						int currCommits = commitMap.get(mapKey);
 
+						if (currCommits >= necessaryCommits) { // if replica has received 2f+1 mathcing commits
 
-							if(currCommits >= necessaryCommits) { //if replica has received 2f+1 mathcing commits 
-
-								//send reply to the client(blockchain protocol) that the operation has been executed
-						        triggerNotification(new CommittedNotification(msg.getBlock(), msg.getBlockSignature()));
-
-								//adicionar reset de maps e seq number e assim aqui acho eu
-
-								logger.info("Sent a commit notification from node " + cryptoName + "to the client with commitCounter: <" + currCommits + ">");
-							} 
-
-                        
-						 
-
-						
-
-
-					}else {
-								logger.warn("Received CommitMessage from " + msg.getSender() + "<" + from
-										+ "> with invalid block signature");
-								}
-
-							}else {
-								logger.warn("Reveived CommitMessage from " + msg.getSender() + "<" + from
-										+ "> with invalid message signature.");
+							// send reply to the client(blockchain protocol) that the operation has been
+							// executed
+                            Block blockCommited = null;
+                            for(Block prepBlock: prepreparedBlocks){
+								if(calculateHash(prepBlock) == msg.getBlock())
+								     blockCommited = prepBlock;
 							}
-		
-						}else {
-							logger.warn("Received CommitMessage from " + msg.getSender() + "<" + from
-									+ "> with invalid Sequence Number");
-							logger.warn(String.format("Current sequence number: %d, Received Sequence Number: %d", this.seq, seqN));
+
+							 triggerNotification(new CommittedNotification(blockCommited,msg.getBlockSignature()));
+
+							// reset maps and lists
+							prepareMap.clear();
+							commitMap.clear();
+							prepreparedBlocks.clear();
+
+							logger.info("Sent a commit notification from node " + cryptoName
+									+ "to the client with commitCounter: <" + currCommits + ">");
 						}
-					}else {
-						logger.warn("Received CommitMessage from " + msg.getSender() + "<" + from
-								+ "> with invalid View Number");
+
+					} else {
+						logger.warn("Reveived CommitMessage from " + msg.getSender() + "<" + from
+								+ "> with invalid message signature.");
 					}
-				}catch (InvalidKeyException | NoSuchAlgorithmException | SignatureException | InvalidFormatException
-				| NoSignaturePresentException |KeyStoreException e) {
+
+				} else {
+					logger.warn("Received CommitMessage from " + msg.getSender() + "<" + from
+							+ "> with invalid Sequence Number");
+					logger.warn(
+							String.format("Current sequence number: %d, Received Sequence Number: %d", this.seq, seqN));
+				}
+			} else {
+				logger.warn("Received CommitMessage from " + msg.getSender() + "<" + from
+						+ "> with invalid View Number");
+			}
+		} catch (InvalidKeyException | NoSuchAlgorithmException | SignatureException | InvalidFormatException
+				| NoSignaturePresentException | KeyStoreException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
-		} 	
+		}
 
-
-
-		
 	}
-
 
 	private void handleMessageFailed(ProtoMessage msg, Host host, short i, Throwable throwable, int i1) {
 		logger.warn("Failed: " + msg + ", to: " + host + ", reason: " + throwable.getMessage());
@@ -509,5 +493,18 @@ public class PBFTProtocol extends GenericProtocol {
 	private void uponInConnectionDown(InConnectionDown event, int channel) {
 		logger.warn(event);
 	}
+
+
+	public static byte[] calculateHash(Block block) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] blockBytes = block.toByteArray();
+            return digest.digest(blockBytes);
+        } catch (NoSuchAlgorithmException e) {
+            e.printStackTrace();
+        }
+		return null;
+        
+    }
 
 }

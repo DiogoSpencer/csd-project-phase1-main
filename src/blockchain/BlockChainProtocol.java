@@ -69,7 +69,7 @@ public class BlockChainProtocol extends GenericProtocol {
 	private final List<Host> view;
 	private boolean leader;
 	private List<Block> blockchainList;
-	private List<byte[]> unhandledRequests;
+	private List<ClientRequest> unhandledRequests;
 
 	public BlockChainProtocol(Properties props) throws NumberFormatException, UnknownHostException {
 		super(BlockChainProtocol.PROTO_NAME, BlockChainProtocol.PROTO_ID);
@@ -84,7 +84,7 @@ public class BlockChainProtocol extends GenericProtocol {
 		view = new LinkedList<>();
 		this.commitNotificationMap = new HashMap<>();
 		this.popularcommitNotification = new HashMap.SimpleEntry<>(new byte[0], 0);
-		unhandledRequests = new ArrayList<byte[]>();
+		unhandledRequests = new ArrayList<ClientRequest>();
 
 		//generate blockhain
 		blockchainList = new ArrayList<Block>();
@@ -173,7 +173,7 @@ public class BlockChainProtocol extends GenericProtocol {
 				// Only one block should be submitted for agreement at a time
 				// Also this assumes that a block only contains a single client request
 				byte[] request = req.generateByteRepresentation();
-				//byte[] signature = SignaturesHelper.generateSignature(request, this.key);
+				
 
 				
 
@@ -188,7 +188,9 @@ public class BlockChainProtocol extends GenericProtocol {
 
 				Block blockToPurpose = new Block(hashOfPrevious, lastBlock.getSequenceNumber()+1, operationsProposed, cryptoName);
 
-				byte[] signature = SignaturesHelper.generateSignature(blockToPurpose, this.key);
+				byte[] signature = SignaturesHelper.generateSignature(blockToPurpose.toByteArray(), this.key); //sign the block
+
+				blockToPurpose.setSignature(signature); //add signature to the block
 
 				
 				
@@ -196,14 +198,14 @@ public class BlockChainProtocol extends GenericProtocol {
 				sendRequest(new ProposeRequest(blockToPurpose, signature), PBFTProtocol.PROTO_ID);
 
 				//log the request in the unhandle request log
-				unhandledRequests.add(request);
+				unhandledRequests.add(req);
 
 			} catch (Exception e) {
 				e.printStackTrace();
 				System.exit(1); // Catastrophic failure!!!
 			}
 		} else {
-			// TODO: Redirect this request to the leader via a specialized message
+			// Redirect this request to the leader via a specialized message
 
 			int remainderofView = viewNumber % view.size();
 			int currentPrimary;
@@ -215,6 +217,9 @@ public class BlockChainProtocol extends GenericProtocol {
 			}	
 
 			Host leaderHost = view.get(currentPrimary-1); //getting the leader
+
+
+			logger.info("Redirecting client request to leader");
 
 			sendMessage(new RedirectClientRequestMessage(req.getOperation()), leaderHost);
 
@@ -242,7 +247,7 @@ public class BlockChainProtocol extends GenericProtocol {
 
 		logger.info("New view received (" + vc.getViewNumber() + ")");
 
-		// TODO: Should maybe validate this ViewChange :)
+		// TODO: Should maybe validate this ViewChange :) (check if we received 2f+1 viewChange notifications )
 
 		this.viewNumber = vc.getViewNumber();
 		this.view.clear();
@@ -276,8 +281,8 @@ public class BlockChainProtocol extends GenericProtocol {
 
 			// Verify if the signature of the block is valid
 			try {
-				if (SignaturesHelper.checkSignature(cn.getBlock().getOperations().get(0), cn.getSignature(),
-						truststore.getCertificate(cryptoName).getPublicKey())) {
+				if (SignaturesHelper.checkSignature(cn.getBlock().toByteArray(), cn.getSignature(),
+						truststore.getCertificate(cn.getBlock().getReplicaIdentity()).getPublicKey())) {
 
 					byte[] mapKey = cn.getSignature();
 
@@ -298,7 +303,7 @@ public class BlockChainProtocol extends GenericProtocol {
 					int necessaryCommitNotifications = (view.size() / 3) + 1;
 					int currCommitNotifications = commitNotificationMap.get(mapKey);
 
-					logger.info("Reply of block decision received: " + cn.getBlock() + " counter: "
+					logger.info("Reply of block decision received: " + cn.getBlock().getSignature() + " counter: "
 							+ currCommitNotifications);
 
 					if (currCommitNotifications >= necessaryCommitNotifications) { // if replica has received f+1 mathcing commit notifications
@@ -308,8 +313,12 @@ public class BlockChainProtocol extends GenericProtocol {
                         //TODO Remove the request from unhadled requests
 						Block blockToAdd = cn.getBlock();
                         
-                        
-						unhandledRequests.remove(blockToAdd.getOperations().get(0));
+                        for(ClientRequest currentRequest : unhandledRequests){ //if the request was in this block remove that request from the unhadleRequests log
+							if(currentRequest.getOperation() == blockToAdd.getOperations().get(0))
+							     unhandledRequests.remove(currentRequest);
+						}
+						
+						logger.info("Request of block added with sequence number: " + blockToAdd.getSequenceNumber());
 
 						// add block to the blockchain
 						blockchainList.add(blockToAdd);
@@ -383,6 +392,9 @@ public class BlockChainProtocol extends GenericProtocol {
 				logger.warn("Request " + request.getRequestId() + " has timed out.");
 
 				// Send messages to all the replicas (start suspect)
+				//sendMessage() client request unhandled
+
+				
                 
 			
 
@@ -400,7 +412,7 @@ public class BlockChainProtocol extends GenericProtocol {
 		if (leader) {
 			logger.warn("Leader suspect timer triggered for the current leader.");
 
-			// TODO: Take appropriate action as the leader (e.g., initiate a view change)
+			// TODO: Take appropriate action as the leader initiate view change by sending message to all replicas
 
 		} else {
 			logger.info("Leader suspect timer triggered for a non-leader replica.");
@@ -426,7 +438,7 @@ public class BlockChainProtocol extends GenericProtocol {
 		sendRequest(new ClientRequest(b), BlockChainProtocol.PROTO_ID);
 	}
 
-	public static byte[] calculateHash(Block block) {
+	public static byte[] calculateHash(Block block) { //function to hash a block
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] blockBytes = block.toByteArray();
