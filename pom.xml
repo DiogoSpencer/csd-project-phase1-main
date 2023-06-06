@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>pt.unl.fct.di.novasys</groupId>
-    <artifactId>csd2223-proj1</artifactId>
+    <artifactId>csd2223-client</artifactId>
     <version>0.0.1</version>
 
     <properties>
@@ -31,6 +31,18 @@
             <artifactId>log4j-slf4j-impl</artifactId>
             <version>2.20.0</version>
         </dependency>
+        
+        <dependency>
+			<groupId>org.codehaus.jackson</groupId>
+			<artifactId>jackson-core-asl</artifactId>
+			<version>1.9.7</version>
+		</dependency>
+
+		<dependency>
+   		 	<groupId>org.hdrhistogram</groupId>
+    		<artifactId>HdrHistogram</artifactId>
+    		<version>2.1.12</version>
+		</dependency>
 
     </dependencies>
 
@@ -54,7 +66,7 @@
                 <configuration>
                     <transformers>
                         <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                            <mainClass>app.RandomGenerationOperationApp</mainClass>
+                            <mainClass>app.OpenGoodsMarketClient</mainClass>
                             <manifestEntries>
                                 <Multi-Release>true</Multi-Release>
                             </manifestEntries>
@@ -70,7 +82,7 @@
                             <goal>shade</goal>
                         </goals>
                         <configuration>
-                            <finalName>../deploy/csd2223-proj1</finalName>
+                            <finalName>../deploy/csd2223-client</finalName>
                         </configuration>
                     </execution>
                 </executions>
