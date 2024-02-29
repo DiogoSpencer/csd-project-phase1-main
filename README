@@ -3,7 +3,6 @@ Dependable Distributed Systems- Project 1
 
 A group project made for an university class focused on Dependable Distributed Systems.
 
-Practical Byzantine Fault Tolerance
 
  This project was aimed at building an Open Goods Markey system composed of three layers (or protocols) for each replica. 
  From top to bottom:
