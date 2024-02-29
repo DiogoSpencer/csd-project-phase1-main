@@ -10,13 +10,10 @@ Practical Byzantine Fault Tolerance
 
     -There is the application logic (not on this repository)
 
-    -The Blockchain Protocol
+    -The Blockchain Protocol: The blockchain protocol will act as the client for the PBFT agreement protocol.
 
-    -A Byzantine-fault tolerant consesus protocol, in particular we will be using the well known Practical Byzantine Fault Tolerance Protocol (PBFT)
-
-
-
-
+    -A Byzantine-fault tolerant consesus protocol, in particular we will be using the well known Practical Byzantine Fault Tolerance Protocol (PBFT):  This is the agreement protocol used in our system to allow replicas to agree on which set of operations (i.e., block)
+ to be added to the replicated ledger maintained by the Blockchain protocol. 
 
 
 
